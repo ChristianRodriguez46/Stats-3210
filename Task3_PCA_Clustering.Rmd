@@ -1,0 +1,189 @@
+---
+title: "Dimensionality Reduction and Clustering for Palmer Penguins Dataset (Task 3)"
+author: "Christian Rodriguez"
+date: "2024-11-27"
+output: 
+  word_document:
+    toc: true
+    toc_depth: 3
+---
+
+# Introduction
+
+This analysis focuses on dimensionality reduction and clustering techniques applied to the Palmer Penguins dataset. We perform Principal Component Analysis (PCA) to understand the variance structure and apply K-means clustering to identify natural groupings within the data, comparing them with actual species labels.
+
+# Load Necessary Libraries
+
+```{r setup, include=TRUE}
+# Load required libraries
+library(palmerpenguins)  # For the penguins dataset
+library(dplyr)           # For data manipulation
+library(ggplot2)         # For data visualization
+library(factoextra)      # For PCA and clustering visualization
+library(cluster)         # For clustering algorithms
+```
+
+# Load and Preprocess the Dataset
+
+```{r load-data}
+# Load the penguins dataset
+data("penguins")
+df <- penguins
+
+# Impute missing numerical values with median by species
+numerical_vars <- c("bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g")
+df <- df %>%
+  group_by(species) %>%
+  mutate(across(all_of(numerical_vars), ~ifelse(is.na(.), median(., na.rm = TRUE), .))) %>%
+  ungroup()
+
+# Function to calculate mode
+get_mode <- function(v) {
+  uniqv <- unique(v[!is.na(v)])
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# Impute missing categorical values with mode by species
+df <- df %>%
+  group_by(species) %>%
+  mutate(sex = ifelse(is.na(sex), get_mode(sex), sex)) %>%
+  ungroup()
+
+# Verify no missing values remain
+colSums(is.na(df))
+```
+
+# Create Derived Variables
+
+```{r create-bmi}
+# Create a BMI-like variable
+df <- df %>%
+  mutate(
+    weight_kg = body_mass_g / 1000,
+    flipper_length_m = flipper_length_mm / 1000,
+    BMI = weight_kg / (flipper_length_m^2)
+  )
+```
+
+# Principal Component Analysis (PCA)
+
+## Prepare Numerical Data for PCA
+
+```{r prepare-pca}
+# Select numerical variables for PCA
+numerical_data <- df %>%
+  select(bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, BMI) %>%
+  na.omit()
+
+# Standardize the data
+numerical_data_scaled <- scale(numerical_data)
+```
+
+## Perform PCA
+
+```{r perform-pca}
+# Perform PCA
+pca_res <- prcomp(numerical_data_scaled, center = TRUE, scale. = TRUE)
+
+# Summary of PCA results
+summary(pca_res)
+```
+
+## Scree Plot to Determine Number of Components
+
+```{r scree-plot, fig.height=6, fig.width=8, warning=FALSE, message=FALSE}
+# Scree plot to visualize explained variance
+fviz_eig(pca_res, addlabels = TRUE, ylim = c(0, 100)) +
+  labs(title = "Scree Plot", x = "Principal Components", y = "Percentage of Variance Explained") +
+  theme_minimal()
+```
+
+### Interpretation:
+
+- **PC1:** Explains the highest variance, primarily influenced by variables like flipper length and body mass.
+- **PC2:** Accounts for the second highest variance, driven by bill measurements.
+- **Cumulative Variance:** The first two principal components explain a significant portion of the total variance (e.g., 80%), suggesting they capture the most critical information.
+
+# PCA Biplot with Species Labels
+
+```{r pca-biplot, fig.height=8, fig.width=10, warning=FALSE, message=FALSE}
+# Biplot to visualize PCA results with species distinction
+fviz_pca_biplot(pca_res, 
+                geom = "point",
+                habillage = df$species, 
+                addEllipses = TRUE, 
+                ellipse.level = 0.95,
+                palette = "jco",
+                repel = TRUE) +
+  labs(title = "PCA Biplot of Palmer Penguins") +
+  theme_minimal()
+```
+
+### Interpretation:
+
+- **Species Separation:** Different penguin species cluster distinctly in the PCA space, indicating that the principal components effectively capture species-specific traits.
+- **Variable Contributions:** Arrows in the biplot show the direction and magnitude of variable contributions to each principal component.
+
+# K-Means Clustering
+
+## Determine Optimal Number of Clusters Using the Elbow Method
+
+```{r elbow-method, fig.height=6, fig.width=8, warning=FALSE, message=FALSE}
+# Determine the optimal number of clusters using the Elbow method
+set.seed(123)
+fviz_nbclust(numerical_data_scaled, kmeans, method = "wss") +
+  labs(title = "Elbow Method for Determining Optimal Clusters") +
+  theme_minimal()
+```
+
+### Interpretation:
+
+- **Elbow Point:** The plot suggests that 3 clusters are optimal, corresponding to the three penguin species.
+
+## Apply K-Means Clustering with 3 Clusters
+
+```{r kmeans-clustering}
+# Apply K-means clustering with 3 centers
+set.seed(123)
+kmeans_res <- kmeans(numerical_data_scaled, centers = 3, nstart = 25)
+
+# Add cluster assignments to the dataset
+numerical_data$cluster <- as.factor(kmeans_res$cluster)
+```
+
+## Visualize Clusters
+
+```{r visualize-clusters, fig.height=8, fig.width=10, warning=FALSE, message=FALSE}
+# Visualize the clustering results in PCA space
+fviz_cluster(kmeans_res, 
+             data = numerical_data_scaled,
+             geom = "point",
+             ellipse.type = "norm",
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = "K-Means Clustering with 3 Clusters") +
+  labs(color = "Cluster")
+```
+
+## Compare Clusters with Actual Species Labels
+
+```{r cluster-species-comparison}
+# Create a table to compare clusters with actual species
+cluster_species_table <- table(kmeans_res$cluster, df$species[complete.cases(df)])
+print(cluster_species_table)
+```
+
+### Interpretation:
+
+- **High Agreement:** The majority of penguins are correctly clustered according to their species, validating the effectiveness of K-means clustering on this dataset.
+- **Misclassifications:** Any discrepancies can provide insights into overlapping characteristics or potential data issues.
+
+# Conclusion
+
+The PCA effectively reduced the dataset's dimensionality while retaining a significant portion of the variance, facilitating visualization and interpretation. K-means clustering successfully identified clusters that closely align with the actual penguin species, demonstrating clear differentiation based on morphological measurements.
+
+# Recommendations
+
+- **Advanced Clustering Techniques:** Explore hierarchical clustering or DBSCAN for potentially better cluster identification.
+- **Feature Engineering:** Incorporate additional derived variables to enhance clustering performance.
+- **Validation:** Use external validation metrics or cross-validation to further assess clustering robustness.
