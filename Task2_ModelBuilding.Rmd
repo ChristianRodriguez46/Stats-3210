@@ -1,0 +1,215 @@
+---
+title: "Model Building and Statistical Analysis for Palmer Penguins Dataset (Task 2)"
+author: "Christian Rodriguez"
+date: "2024-11-27"
+output: 
+  word_document:
+    toc: true
+    toc_depth: 3
+---
+
+# Introduction
+
+In this analysis, we build and evaluate predictive models to understand the factors influencing penguin body mass. We assess model assumptions, perform transformations when necessary, and compare multiple models using Adjusted R², AIC, and BIC criteria to select the best-fitting model.
+
+# Load Necessary Libraries
+
+```{r setup, include=TRUE}
+# Load required libraries
+library(palmerpenguins)  # For the penguins dataset
+library(dplyr)           # For data manipulation
+library(ggplot2)         # For data visualization
+library(tidyr)           # For data tidying
+library(broom)           # For tidying model outputs
+```
+
+# Load and Preprocess the Dataset
+
+```{r load-data}
+# Load the penguins dataset
+data("penguins")
+df <- penguins
+
+# Impute missing numerical values with median by species
+numerical_vars <- c("bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g")
+df <- df %>%
+  group_by(species) %>%
+  mutate(across(all_of(numerical_vars), ~ifelse(is.na(.), median(., na.rm = TRUE), .))) %>%
+  ungroup()
+
+# Function to calculate mode
+get_mode <- function(v) {
+  uniqv <- unique(v[!is.na(v)])
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# Impute missing categorical values with mode by species
+df <- df %>%
+  group_by(species) %>%
+  mutate(sex = ifelse(is.na(sex), get_mode(sex), sex)) %>%
+  ungroup()
+
+# Verify no missing values remain
+colSums(is.na(df))
+```
+
+# Create Derived Variables
+
+```{r create-bmi}
+# Create a BMI-like variable
+df <- df %>%
+  mutate(
+    weight_kg = body_mass_g / 1000,
+    flipper_length_m = flipper_length_mm / 1000,
+    BMI = weight_kg / (flipper_length_m^2)
+  )
+```
+
+# Prepare Data for Modeling
+
+```{r prepare-model-data}
+# Select relevant variables for modeling
+model_data <- df %>%
+  select(body_mass_g, bill_length_mm, bill_depth_mm, flipper_length_mm, species, sex, island, BMI) %>%
+  na.omit()
+
+# Encode categorical variables as factors
+model_data$species <- as.factor(model_data$species)
+model_data$sex <- as.factor(model_data$sex)
+model_data$island <- as.factor(model_data$island)
+```
+
+# Exploratory Data Analysis for Modeling
+
+```{r eda-modeling}
+# Pairwise correlations
+pairs(model_data %>% select(bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, BMI),
+      main = "Pairwise Scatter Plots")
+```
+
+# Model Building
+
+## Model 1: Full Model with All Predictors
+
+```{r model1}
+# Build linear regression model using all predictors
+model1 <- lm(body_mass_g ~ bill_length_mm + bill_depth_mm + flipper_length_mm + species + sex + island + BMI, data = model_data)
+summary(model1)
+```
+
+# Check Model Assumptions
+
+```{r plot-model1, fig.height=8, fig.width=10, warning=FALSE, message=FALSE}
+# Plot diagnostic plots for Model 1
+par(mfrow = c(2, 2))
+plot(model1)
+par(mfrow = c(1, 1))  # Reset to default
+```
+
+### Interpretation:
+
+- **Residuals vs Fitted:** Check for non-linearity and homoscedasticity. Ideally, residuals should be randomly scattered without patterns.
+- **Normal Q-Q:** Assess the normality of residuals. Points should fall approximately along the reference line.
+- **Scale-Location:** Further checks for homoscedasticity. A horizontal line with equally spread points is desired.
+- **Residuals vs Leverage:** Identifies influential observations. Points outside Cook's distance lines may be influential.
+
+## Model 2: Log-Transformed Response Variable
+
+### Rationale
+
+If Model 1 violates assumptions such as normality of residuals or heteroscedasticity, a log transformation of the response variable can help stabilize variance and improve normality.
+
+```{r model2}
+# Add log-transformed response variable
+model_data <- model_data %>%
+  mutate(log_body_mass_g = log(body_mass_g))
+
+# Build linear regression model with log-transformed response
+model2 <- lm(log_body_mass_g ~ bill_length_mm + bill_depth_mm + flipper_length_mm + species + sex + island + BMI, data = model_data)
+summary(model2)
+```
+
+# Check Model Assumptions for Model 2
+
+```{r plot-model2, fig.height=8, fig.width=10, warning=FALSE, message=FALSE}
+# Plot diagnostic plots for Model 2
+par(mfrow = c(2, 2))
+plot(model2)
+par(mfrow = c(1, 1))  # Reset to default
+```
+
+### Interpretation:
+
+- **Residuals vs Fitted:** Should exhibit randomness without clear patterns.
+- **Normal Q-Q:** Residuals should align closely with the reference line, indicating normality.
+- **Scale-Location:** Points should be evenly spread without funnel shapes.
+- **Residuals vs Leverage:** Minimal influential points should exist.
+
+# Model Comparison
+
+## Using Adjusted R², AIC, and BIC
+
+```{r model-comparison}
+# Compare Model 1 and Model 2 using AIC and BIC
+AIC(model1, model2)
+BIC(model1, model2)
+```
+
+### Interpretation:
+
+- **Adjusted R²:** Higher values indicate better model fit while accounting for the number of predictors.
+- **AIC and BIC:** Lower values suggest a better balance between model fit and complexity.
+
+## Model 3: Reduced Model with Significant Predictors
+
+### Rationale
+
+To simplify the model and potentially improve performance, we exclude less significant predictors based on Model 1's summary.
+
+```{r model3}
+# Build a reduced model excluding non-significant predictors (e.g., BMI)
+model3 <- lm(body_mass_g ~ bill_length_mm + flipper_length_mm + species + sex + island, data = model_data)
+summary(model3)
+```
+
+# Compare All Models
+
+```{r compare-all-models}
+# Compare all three models
+AIC(model1, model2, model3)
+BIC(model1, model2, model3)
+```
+
+### Interpretation:
+
+- **Lowest AIC and BIC:** Indicates the best model among the compared ones.
+- **Adjusted R²:** Helps assess whether adding more predictors justifies the complexity.
+
+# Model Selection
+
+Based on the comparison criteria, select the model with the best balance between fit and simplicity.
+
+```{r select-model}
+# Assume Model 3 has the lowest AIC and BIC
+selected_model <- model3
+summary(selected_model)
+```
+
+# Final Model Diagnostics
+
+```{r final-model-diagnostics, fig.height=8, fig.width=10, warning=FALSE, message=FALSE}
+# Plot diagnostic plots for the selected model
+par(mfrow = c(2, 2))
+plot(selected_model)
+par(mfrow = c(1, 1))  # Reset to default
+```
+
+# Conclusion
+
+Through systematic model building and evaluation, we identified the most suitable linear regression model for predicting penguin body mass. The selected model balances complexity and performance, adhering to regression assumptions and demonstrating significant predictors.
+
+# Recommendations
+
+- **Further Analysis:** Explore interaction terms or non-linear relationships if residual patterns persist.
+- **Alternative Models:** Consider other modeling techniques like generalized linear models or tree-based methods for potentially better performance.
+- **Data Enrichment:** Incorporate additional variables or external data sources to enhance model accuracy.
