@@ -1,0 +1,204 @@
+---
+title: "Data Preprocessing for Palmer Penguins Dataset (Task 1)"
+author: "Christian Rodriguez"
+date: "2024-11-27"
+output: 
+  word_document: 
+    toc: true
+    toc_depth: 3
+---
+
+# Introduction
+
+In this analysis, we perform data preprocessing on the Palmer Penguins dataset. The steps include loading and inspecting the dataset, handling missing values through logical imputation, and conducting an extensive exploratory data analysis (EDA) with summary statistics and visualizations.
+
+# Load Necessary Libraries
+
+```{r setup, include=TRUE}
+# Load required libraries
+library(palmerpenguins)  # For the penguins dataset
+library(dplyr)           # For data manipulation
+library(ggplot2)         # For data visualization
+library(tidyr)           # For data tidying
+library(GGally)          # For pair plots
+```
+
+# Load the Dataset
+
+```{r load-data}
+# Load the penguins dataset
+data("penguins")
+df <- penguins
+```
+
+# Inspect the Dataset
+
+```{r inspect-data}
+# Structure of the dataset
+str(df)
+
+# Summary statistics
+summary(df)
+
+# Preview the first few rows
+head(df)
+```
+
+# Handle Missing Values
+
+## Check for Missing Values
+
+```{r missing-values}
+# Calculate the number of missing values in each column
+colSums(is.na(df))
+```
+
+## Impute Missing Numerical Values
+
+### Strategy
+
+Imputing missing numerical values using the median within each species ensures that the imputed values are representative of the specific traits of that species. This approach maintains the integrity of species-specific distributions and avoids introducing bias that could occur if a global median were used.
+
+```{r impute-numerical}
+# Define numerical variables
+numerical_vars <- c("bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g")
+
+# Impute missing numerical values with median by species
+df <- df %>%
+  group_by(species) %>%
+  mutate(across(all_of(numerical_vars), ~ifelse(is.na(.), median(., na.rm = TRUE), .))) %>%
+  ungroup()
+```
+
+## Impute Missing Categorical Values
+
+### Strategy
+
+For categorical variables, imputing missing values with the mode within each species helps maintain the natural distribution and relationships in the data. This method ensures that the imputed categories are consistent with the species-specific characteristics.
+
+```{r impute-categorical}
+# Function to calculate mode
+get_mode <- function(v) {
+  uniqv <- unique(v[!is.na(v)])
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+# Impute missing values in 'sex' variable with mode by species
+df <- df %>%
+  group_by(species) %>%
+  mutate(sex = ifelse(is.na(sex), get_mode(sex), sex)) %>%
+  ungroup()
+```
+
+## Verify No Missing Values Remain
+
+```{r verify-no-missing}
+# Confirm that there are no missing values
+colSums(is.na(df))
+```
+
+# Create Derived Variables
+
+### Example: Creating a BMI-like Variable
+
+Assuming `body_mass_g` as weight in grams and `flipper_length_mm` as height in millimeters, we create a BMI-like metric for penguins.
+
+```{r create-bmi}
+# Create a new column 'BMI' based on 'body_mass_g' and 'flipper_length_mm'
+# Convert grams to kilograms and millimeters to meters for BMI calculation
+df <- df %>%
+  mutate(
+    weight_kg = body_mass_g / 1000,
+    flipper_length_m = flipper_length_mm / 1000,
+    BMI = weight_kg / (flipper_length_m^2)
+  )
+
+# View the first few rows to verify the new columns
+head(df)
+```
+
+# Generate Summary Statistics
+
+```{r summary-statistics}
+# Summary statistics of the cleaned dataset
+summary(df)
+```
+
+# Initial Visualizations
+
+## Boxplots for Numerical Variables by Species
+
+```{r boxplots, fig.height=6, fig.width=8, warning=FALSE, message=FALSE}
+# Boxplots to visualize the distribution of numerical variables across species
+ggplot(df, aes(x = species, y = bill_length_mm, fill = species)) +
+  geom_boxplot() +
+  labs(title = "Bill Length by Species", x = "Species", y = "Bill Length (mm)") +
+  theme_minimal()
+
+ggplot(df, aes(x = species, y = bill_depth_mm, fill = species)) +
+  geom_boxplot() +
+  labs(title = "Bill Depth by Species", x = "Species", y = "Bill Depth (mm)") +
+  theme_minimal()
+
+ggplot(df, aes(x = species, y = flipper_length_mm, fill = species)) +
+  geom_boxplot() +
+  labs(title = "Flipper Length by Species", x = "Species", y = "Flipper Length (mm)") +
+  theme_minimal()
+
+ggplot(df, aes(x = species, y = body_mass_g, fill = species)) +
+  geom_boxplot() +
+  labs(title = "Body Mass by Species", x = "Species", y = "Body Mass (g)") +
+  theme_minimal()
+```
+
+## Scatterplots to Explore Relationships Between Variables
+
+```{r scatterplots, fig.height=6, fig.width=8, warning=FALSE, message=FALSE}
+# Scatterplots to identify relationships between variables colored by species
+ggplot(df, aes(x = bill_length_mm, y = body_mass_g, color = species)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Body Mass vs. Bill Length", x = "Bill Length (mm)", y = "Body Mass (g)") +
+  theme_minimal()
+
+ggplot(df, aes(x = flipper_length_mm, y = body_mass_g, color = species)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Body Mass vs. Flipper Length", x = "Flipper Length (mm)", y = "Body Mass (g)") +
+  theme_minimal()
+
+ggplot(df, aes(x = bill_depth_mm, y = flipper_length_mm, color = species)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Flipper Length vs. Bill Depth", x = "Bill Depth (mm)", y = "Flipper Length (mm)") +
+  theme_minimal()
+```
+
+## Additional EDA
+
+### Histograms by Species
+
+```{r histograms, fig.height=6, fig.width=8, warning=FALSE, message=FALSE}
+# Histograms to visualize the distribution of body mass by species
+ggplot(df, aes(x = body_mass_g, fill = species)) +
+  geom_histogram(binwidth = 200, alpha = 0.7, position = "identity") +
+  facet_wrap(~ species) +
+  labs(title = "Distribution of Body Mass by Species", x = "Body Mass (g)", y = "Count") +
+  theme_minimal()
+```
+
+### Pair Plot
+
+```{r pair-plot, fig.height=8, fig.width=10, warning=FALSE, message=FALSE}
+# Pairwise scatter plots with correlations
+ggpairs(df, columns = c("bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g", "BMI"),
+        aes(color = species, alpha = 0.5)) +
+  theme_minimal()
+```
+
+# Interpretation
+
+- **Boxplots:** Reveal distinct differences in measurements among species, indicating unique physical characteristics.
+- **Scatterplots:** Show relationships between variables and potential clusters corresponding to different species.
+- **Histograms and Pair Plots:** Provide deeper insights into data distribution and interactions between variables, highlighting patterns and anomalies.
+
+# Conclusion
+
+The data preprocessing steps have successfully cleaned the Palmer Penguins dataset by handling missing values appropriately and creating derived variables. The exploratory data analysis reveals clear distinctions among penguin species based on their morphological measurements, setting the stage for further statistical analysis and modeling in subsequent tasks.
