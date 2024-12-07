@@ -195,10 +195,38 @@ ggpairs(df, columns = c("bill_length_mm", "bill_depth_mm", "flipper_length_mm", 
 
 # Interpretation
 
-- **Boxplots:** Reveal distinct differences in measurements among species, indicating unique physical characteristics.
-- **Scatterplots:** Show relationships between variables and potential clusters corresponding to different species.
-- **Histograms and Pair Plots:** Provide deeper insights into data distribution and interactions between variables, highlighting patterns and anomalies.
+-   **Boxplots:** Reveal distinct differences in measurements among species, indicating unique physical characteristics.
+    -   **Distribution of Body Mass by Species:**\
+        The histogram clearly illustrates the distribution of body mass for each penguin species:
+        -   **Adelie Penguins (Red):** Show a relatively narrow range of body mass, clustering around 3,500–4,000 g, indicating a smaller size compared to other species.
+
+        -   **Chinstrap Penguins (Green):** Display a slightly broader range, primarily concentrated between 3,500–4,200 g, with some overlap with Adelie penguins.
+
+        -   **Gentoo Penguins (Blue):** Exhibit a distinct and much larger body mass distribution, centered around 5,000–6,000 g, with no overlap with the other two species, highlighting their significantly larger size.
+-   **Histograms:**\
+    The histograms reveal distinct distributions of morphological measurements (e.g., bill length, bill depth, flipper length, and body mass) across the three penguin species. Each species exhibits unique patterns, with minimal overlap in some traits, such as flipper length for Gentoo penguins.
+
+<!-- -->
+
+-   **Scatterplots:**\
+    The scatterplots highlight relationships between variables, such as the positive correlation between flipper length and body mass. Clear clusters corresponding to each penguin species are observed, particularly for Gentoo penguins, which stand out due to their larger body mass and flipper length.
+
+-   **Pair Plots:**\
+    The pair plots provide insights into variable interactions and species-specific trends:
+
+    -   **Adelie Penguins (Red):** Generally smaller in size with less variation in morphological traits.
+
+    -   **Chinstrap Penguins (Green):** Show intermediate values with noticeable overlap in some traits with Adelie penguins.
+
+    -   **Gentoo Penguins (Blue):** Distinctly larger in size, standing out in flipper length and body mass.
+
+-   **Correlations:**\
+    The correlation coefficients across variables differ by species:
+
+    -   High positive correlations are observed for Gentoo penguins between flipper length and body mass.
+
+    -   Chinstrap penguins exhibit stronger correlations in bill depth and body mass compared to other species.
 
 # Conclusion
 
-The data preprocessing steps have successfully cleaned the Palmer Penguins dataset by handling missing values appropriately and creating derived variables. The exploratory data analysis reveals clear distinctions among penguin species based on their morphological measurements, setting the stage for further statistical analysis and modeling in subsequent tasks.
+The data preprocessing steps effectively cleaned the Palmer Penguins dataset by addressing missing values and generating derived variables where necessary. The exploratory data analysis highlights clear distinctions among penguin species based on key morphological measurements, such as body mass, flipper length, and bill dimensions. These analyses provide valuable insights into species-specific traits and relationships between variables, establishing a solid foundation for further statistical analysis, clustering, and predictive modeling in subsequent tasks.
