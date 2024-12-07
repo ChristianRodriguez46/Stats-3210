@@ -10,7 +10,7 @@ output:
 
 # Introduction
 
-In this analysis, we build and evaluate predictive models to understand the factors influencing penguin body mass. We assess model assumptions, perform transformations when necessary, and compare multiple models using Adjusted R², AIC, and BIC criteria to select the best-fitting model.
+In this analysis, I build and evaluate predictive models to understand the factors influencing penguin body mass. I assess model assumptions, perform transformations when necessary, and compare multiple models using Adjusted R², AIC, and BIC criteria to select the best-fitting model.
 
 # Load Necessary Libraries
 
@@ -108,10 +108,19 @@ par(mfrow = c(1, 1))  # Reset to default
 
 ### Interpretation:
 
-- **Residuals vs Fitted:** Check for non-linearity and homoscedasticity. Ideally, residuals should be randomly scattered without patterns.
-- **Normal Q-Q:** Assess the normality of residuals. Points should fall approximately along the reference line.
-- **Scale-Location:** Further checks for homoscedasticity. A horizontal line with equally spread points is desired.
-- **Residuals vs Leverage:** Identifies influential observations. Points outside Cook's distance lines may be influential.
+-   **Residuals vs Fitted**:\
+    The residuals appear to show a curved pattern, indicating potential non-linearity in the relationship between the predictors and the response variable. There is also some evidence of heteroscedasticity (non-constant variance), as the spread of residuals changes across fitted values.
+
+<!-- -->
+
+-   **Normal Q-Q Plot**:\
+    The residuals mostly follow the reference line, suggesting that the assumption of normality is reasonable. However, some deviations at the tails indicate potential outliers or non-normality in the residuals.
+
+-   **Scale-Location**:\
+    The plot shows a curved pattern, with variability in the spread of residuals across fitted values. This suggests heteroscedasticity, as the variance is not constant across the range of fitted values.
+
+-   **Residuals vs Leverage**:\
+    The plot identifies a few points with high leverage (e.g., points outside the dashed Cook’s distance lines). These points may have a disproportionate influence on the model and should be examined further to determine if they are problematic.
 
 ## Model 2: Log-Transformed Response Variable
 
@@ -140,10 +149,21 @@ par(mfrow = c(1, 1))  # Reset to default
 
 ### Interpretation:
 
-- **Residuals vs Fitted:** Should exhibit randomness without clear patterns.
-- **Normal Q-Q:** Residuals should align closely with the reference line, indicating normality.
-- **Scale-Location:** Points should be evenly spread without funnel shapes.
-- **Residuals vs Leverage:** Minimal influential points should exist.
+-   **Residuals vs Fitted**:\
+    The residuals show a curved pattern, indicating potential non-linearity even after the log transformation. This suggests the model may still not fully capture the relationship between predictors and the response variable.
+
+-   **Normal Q-Q Plot**:\
+    The residuals deviate from the reference line at both ends, indicating potential non-normality in the residuals, especially in the tails. This suggests that the log transformation did not fully address the normality issue.
+
+-   **Scale-Location**:\
+    The variability in the spread of residuals is not constant, as indicated by the slightly curved pattern. This suggests that heteroscedasticity persists even after the log transformation.
+
+-   **Residuals vs Leverage**:\
+    A few points are influential, with one or more points close to or outside the Cook's distance line. These observations should be further investigated as they may disproportionately affect the model.
+
+### Summary
+
+The log transformation has improved the model to some extent, but residual diagnostics suggest that further adjustments, such as exploring interactions, polynomial terms, or alternative transformations, may be necessary to improve the model's fit.
 
 # Model Comparison
 
@@ -153,18 +173,31 @@ par(mfrow = c(1, 1))  # Reset to default
 # Compare Model 1 and Model 2 using AIC and BIC
 AIC(model1, model2)
 BIC(model1, model2)
+
+# Extract Adjusted R² for both models
+adj_r2_model1 <- summary(model1)$adj.r.squared
+adj_r2_model2 <- summary(model2)$adj.r.squared
+
+# Print Adjusted R² values
+adj_r2_model1
+adj_r2_model2
 ```
 
 ### Interpretation:
 
-- **Adjusted R²:** Higher values indicate better model fit while accounting for the number of predictors.
-- **AIC and BIC:** Lower values suggest a better balance between model fit and complexity.
+-   **Adjusted R²:**\
+    Higher Adjusted R² values indicate a better model fit while accounting for the number of predictors. In this case, Model 2 has a significantly higher Adjusted R² compared to Model 1, suggesting it explains more variance in the response variable while accounting for model complexity.
+
+<!-- -->
+
+-   **AIC and BIC:**\
+    Lower AIC and BIC values indicate a better trade-off between model fit and complexity. Model 2 has much lower AIC and BIC values than Model 1, indicating that it achieves a significantly better balance between goodness of fit and model simplicity.
 
 ## Model 3: Reduced Model with Significant Predictors
 
 ### Rationale
 
-To simplify the model and potentially improve performance, we exclude less significant predictors based on Model 1's summary.
+To simplify the model and potentially improve performance, I exclude less significant predictors based on Model 1's summary.
 
 ```{r model3}
 # Build a reduced model excluding non-significant predictors (e.g., BMI)
@@ -175,23 +208,58 @@ summary(model3)
 # Compare All Models
 
 ```{r compare-all-models}
-# Compare all three models
-AIC(model1, model2, model3)
-BIC(model1, model2, model3)
+# Compare AIC and BIC for all three models
+aic_values <- AIC(model1, model2, model3)
+bic_values <- BIC(model1, model2, model3)
+
+# Display AIC and BIC values for comparison
+print("AIC Values for All Models:")
+aic_values
+
+print("BIC Values for All Models:")
+bic_values
+
+# Extract Adjusted R² for all models
+adj_r2_model1 <- summary(model1)$adj.r.squared
+adj_r2_model2 <- summary(model2)$adj.r.squared
+adj_r2_model3 <- summary(model3)$adj.r.squared
+
+# Display Adjusted R² values for comparison
+print("Adjusted R² for All Models:")
+c(Model1 = adj_r2_model1, Model2 = adj_r2_model2, Model3 = adj_r2_model3)
 ```
 
 ### Interpretation:
 
-- **Lowest AIC and BIC:** Indicates the best model among the compared ones.
-- **Adjusted R²:** Helps assess whether adding more predictors justifies the complexity.
+-   **Lowest AIC and BIC:**\
+    The model with the **lowest AIC and BIC values** is considered the best, as it strikes the optimal balance between model fit and complexity. In this case:
+
+    -   **Model 2** has the lowest AIC (-2346.969) and BIC (-2304.722), making it the best model among the three in terms of balancing fit and complexity.
+
+    -   **Model 1** has moderate AIC (3730.348) and BIC (3772.596) values, suggesting a poorer fit compared to Model 2.
+
+    -   **Model 3** has the highest AIC (4915.891) and BIC (4950.457), indicating it is the least favorable model.
+
+-   **Adjusted R²:**\
+    Adjusted R² helps assess how well the model explains the variance in the response variable while accounting for the number of predictors:
+
+    -   **Model 2** has the highest Adjusted R² (0.9982541), indicating it explains the most variance after considering model complexity.
+
+    -   **Model 1** has a slightly lower Adjusted R² (0.9954861), indicating a good fit but less optimal than Model 2.
+
+    -   **Model 3** has a much lower Adjusted R² (0.8575254), suggesting that it explains significantly less variance than Models 1 and 2.
+
+### Final Summary:
+
+Model 2 is the best model among the three, as it has the **lowest AIC and BIC values** and the **highest Adjusted R²**, making it the most balanced and explanatory model. While Model 1 is also a strong contender, Model 2 provides a substantially better fit, and Model 3 performs the worst based on all criteria.
 
 # Model Selection
 
 Based on the comparison criteria, select the model with the best balance between fit and simplicity.
 
 ```{r select-model}
-# Assume Model 3 has the lowest AIC and BIC
-selected_model <- model3
+# Select Model 2 as it has the lowest AIC and BIC and highest Adjusted R²
+selected_model <- model2
 summary(selected_model)
 ```
 
@@ -199,17 +267,11 @@ summary(selected_model)
 
 ```{r final-model-diagnostics, fig.height=8, fig.width=10, warning=FALSE, message=FALSE}
 # Plot diagnostic plots for the selected model
-par(mfrow = c(2, 2))
-plot(selected_model)
-par(mfrow = c(1, 1))  # Reset to default
+par(mfrow = c(2, 2))  # Set plotting layout for diagnostics
+plot(selected_model)  # Generate diagnostic plots
+par(mfrow = c(1, 1))  # Reset to default plotting layout
 ```
 
 # Conclusion
 
-Through systematic model building and evaluation, we identified the most suitable linear regression model for predicting penguin body mass. The selected model balances complexity and performance, adhering to regression assumptions and demonstrating significant predictors.
-
-# Recommendations
-
-- **Further Analysis:** Explore interaction terms or non-linear relationships if residual patterns persist.
-- **Alternative Models:** Consider other modeling techniques like generalized linear models or tree-based methods for potentially better performance.
-- **Data Enrichment:** Incorporate additional variables or external data sources to enhance model accuracy.
+Through systematic model building and evaluation, I identified **Model 2** as the most suitable linear regression model for predicting penguin body mass. This model demonstrates the best balance between complexity and performance, adheres to regression assumptions, and identifies significant predictors of penguin body mass. Its metrics, including the lowest AIC and BIC values and the highest Adjusted R², confirm its superiority over other models.
