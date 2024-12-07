@@ -9,9 +9,10 @@ library(plotly)           # For interactive plots
 library(randomForest)     # For Random Forest modeling
 library(caret)            # For cross-validation and model evaluation
 library(shinycssloaders)  # For adding loading animations
-library(cluster)          # Essential for silhouette function
+library(cluster)          # For silhouette function
 library(reshape2)         # For melting the correlation matrix
 library(tibble)           # For rownames_to_column
+library(gbm)              # For Gradient Boosting Models
 
 # Load and preprocess data
 data("penguins")
@@ -23,18 +24,31 @@ penguins <- penguins %>%
     sex = as.factor(sex)
   )
 
-# Define UI
+# Add BMI-related variables
+penguins <- penguins %>%
+  mutate(
+    body_mass_kg = body_mass_g / 1000,
+    flipper_length_m = flipper_length_mm / 1000,
+    BMI = body_mass_kg / (flipper_length_m^2)
+  )
+
 ui <- dashboardPage(
   dashboardHeader(title = "Palmer Penguins Analysis"),
   dashboardSidebar(
     sidebarMenu(
+      menuItem("Plot Formatting", icon = icon("sliders-h"),
+               sliderInput("global_alpha", "Global Alpha (Transparency)", min = 0.1, max = 1, value = 0.6, step = 0.1),
+               selectInput("global_shape", "Global Point Shape", 
+                           choices = c("Circle"=16, "Triangle"=17, "Square"=15, "Diamond"=18), 
+                           selected = 16)
+      ),
       menuItem("Exploratory Data Analysis", tabName = "eda", icon = icon("chart-bar")),
       menuItem("Predictive Modeling", tabName = "model", icon = icon("project-diagram")),
       menuItem("PCA & Clustering", tabName = "pca_cluster", icon = icon("layer-group")),
       menuItem("Column Modifier", tabName = "column_mod", icon = icon("edit")),
       menuItem("Download Data", tabName = "download_data", icon = icon("download"))
     ),
-    # Filters with Help Tooltips (Tooltips can be added using additional packages if desired)
+    # Filters
     selectInput("species_filter", "Species", choices = levels(penguins$species), selected = levels(penguins$species), multiple = TRUE),
     selectInput("island_filter", "Island", choices = levels(penguins$island), selected = levels(penguins$island), multiple = TRUE),
     selectInput("sex_filter", "Sex", choices = levels(penguins$sex), selected = levels(penguins$sex), multiple = TRUE)
@@ -47,23 +61,27 @@ ui <- dashboardPage(
                 box(title = "Plots", status = "primary", solidHeader = TRUE, width = 12,
                     tabsetPanel(
                       tabPanel("Scatterplot",
+                               textInput("scatter_title", "Scatterplot Title", "Scatterplot"),
                                selectInput("x_axis", "X-axis", choices = NULL, selected = "bill_length_mm"),
                                selectInput("y_axis", "Y-axis", choices = NULL, selected = "bill_depth_mm"),
                                plotlyOutput("scatterPlot") %>% withSpinner(),
                                downloadButton("downloadScatter", "Download Plot")
                       ),
                       tabPanel("Boxplot",
+                               textInput("box_title", "Boxplot Title", "Boxplot"),
                                selectInput("box_var", "Variable", choices = NULL, selected = "body_mass_g"),
                                plotlyOutput("boxPlot") %>% withSpinner(),
                                downloadButton("downloadBox", "Download Plot")
                       ),
                       tabPanel("Histogram/Density",
+                               textInput("hist_title", "Histogram Title", "Histogram/Density"),
                                selectInput("hist_var", "Variable", choices = NULL, selected = "bill_length_mm"),
                                checkboxInput("show_density", "Show Density Curve", value = FALSE),
                                plotlyOutput("histPlot") %>% withSpinner(),
                                downloadButton("downloadHist", "Download Plot")
                       ),
                       tabPanel("Correlation Heatmap",
+                               textInput("corr_title", "Heatmap Title", "Correlation Heatmap"),
                                plotlyOutput("corrHeatmap") %>% withSpinner(),
                                downloadButton("downloadCorr", "Download Heatmap")
                       )
@@ -87,28 +105,47 @@ ui <- dashboardPage(
       tabItem(tabName = "model",
               fluidRow(
                 box(title = "Build Predictive Model", status = "primary", solidHeader = TRUE, width = 12,
-                    selectInput("model_type", "Model Type", choices = c("Linear Regression", "Random Forest"), selected = "Linear Regression"),
+                    selectInput("model_type", "Model Type", 
+                                choices = c("Linear Regression", "Generalized Linear Model", "Random Forest", "Gradient Boosting"),
+                                selected = "Linear Regression"),
                     selectInput("response_var", "Response Variable", choices = NULL, selected = "body_mass_g"),
                     selectInput("predictor_vars", "Predictor Variables", choices = NULL, selected = NULL, multiple = TRUE),
                     checkboxInput("use_cv", "Use Cross-Validation", value = TRUE),
+                    sliderInput("train_ratio", "Training Set Ratio", min = 0.5, max = 0.9, value = 0.7, step = 0.05),
                     actionButton("runModel", "Run Model"),
                     verbatimTextOutput("modelOutput") %>% withSpinner(),
                     downloadButton("downloadModel", "Download Model Summary")
                 )
               ),
               fluidRow(
-                # Conditional Panel for Linear Regression Diagnostics
+                conditionalPanel(
+                  condition = "input.model_type != 'Generalized Linear Model' && input.model_type != 'Linear Regression'",
+                  box(title = "Variable Importance", status = "info", solidHeader = TRUE, width = 6,
+                      textInput("varimp_title", "Variable Importance Title", "Variable Importance"),
+                      plotlyOutput("varImpPlot") %>% withSpinner()
+                  )
+                ),
+                box(title = "Model Performance", status = "info", solidHeader = TRUE, width = 6,
+                    textInput("modelperf_title", "Model Performance Title", "Model Performance"),
+                    verbatimTextOutput("modelPerformance") %>% withSpinner()
+                )
+              ),
+              fluidRow(
+                # Conditional Panel for Regression Diagnostics (applies to Linear Regression only)
                 conditionalPanel(
                   condition = "input.model_type == 'Linear Regression'",
                   box(title = "Linear Regression Diagnostics", status = "info", solidHeader = TRUE, width = 12,
                       tabsetPanel(
                         tabPanel("Residuals vs Fitted",
+                                 textInput("resid_title", "Residuals vs Fitted Title", "Residuals vs Fitted"),
                                  plotlyOutput("residualsPlot") %>% withSpinner()
                         ),
                         tabPanel("Normal Q-Q",
+                                 textInput("qq_title", "Normal Q-Q Title", "Normal Q-Q"),
                                  plotlyOutput("qqPlot") %>% withSpinner()
                         ),
                         tabPanel("Actual vs Predicted",
+                                 textInput("ap_title", "Actual vs Predicted Title", "Actual vs Predicted"),
                                  plotlyOutput("actualPredictedPlot") %>% withSpinner()
                         )
                       )
@@ -121,26 +158,27 @@ ui <- dashboardPage(
       tabItem(tabName = "pca_cluster",
               fluidRow(
                 box(title = "Principal Component Analysis", status = "primary", solidHeader = TRUE, width = 6,
+                    textInput("pca_title", "PCA Biplot Title", "PCA Biplot"),
                     checkboxInput("normalize_pca", "Normalize Data", value = TRUE),
                     plotlyOutput("pcaPlot") %>% withSpinner(),
                     downloadButton("downloadPCA", "Download PCA Plot")
                 ),
                 box(title = "PCA Scree Plot", status = "primary", solidHeader = TRUE, width = 6,
+                    textInput("scree_title", "Scree Plot Title", "PCA Scree Plot"),
                     plotlyOutput("screePlot") %>% withSpinner(),
                     downloadButton("downloadScree", "Download Scree Plot")
                 )
               ),
               fluidRow(
                 box(title = "Clustering", status = "primary", solidHeader = TRUE, width = 6,
+                    textInput("cluster_title", "Clustering Plot Title", "Clustering Plot"),
                     selectInput("clust_algo", "Clustering Algorithm", choices = c("K-Means", "Hierarchical"), selected = "K-Means"),
-                    conditionalPanel(
-                      condition = "input.clust_algo == 'K-Means'",
-                      numericInput("num_clusters", "Number of Clusters", value = 3, min = 2, max = 10)
-                    ),
+                    numericInput("num_clusters", "Number of Clusters", value = 3, min = 2, max = 10),
                     plotlyOutput("clusterPlot") %>% withSpinner(),
                     downloadButton("downloadCluster", "Download Cluster Plot")
                 ),
                 box(title = "Clustering Metrics", status = "primary", solidHeader = TRUE, width = 6,
+                    textInput("metrics_title", "Clustering Metrics Title", "Clustering Metrics"),
                     tableOutput("clusterMetrics") %>% withSpinner()
                 )
               )
@@ -149,11 +187,30 @@ ui <- dashboardPage(
       # Column Modifier Tab
       tabItem(tabName = "column_mod",
               fluidRow(
-                box(title = "Modify or Create Column", status = "primary", solidHeader = TRUE, width = 12,
+                box(title = "Modify or Create Column (Formula)", status = "primary", solidHeader = TRUE, width = 12,
                     textInput("new_column_name", "New Column Name"),
                     textAreaInput("column_formula", "R Formula", placeholder = "e.g., ifelse(sex == 'male' & body_mass_g > 4000, 'Large Male', 'Other')"),
                     actionButton("modifyColumn", "Apply"),
                     tableOutput("modifiedData") %>% withSpinner()
+                )
+              ),
+              fluidRow(
+                box(title = "Apply Predefined Transformation", status = "info", solidHeader = TRUE, width = 6,
+                    selectInput("transform_col", "Select Numeric Column", choices = NULL),
+                    selectInput("transform_type", "Transformation",
+                                choices = c("None", "Log (natural)", "Square Root", "Standard Scale")),
+                    textInput("transformed_col_name", "Transformed Column Name", value = "transformed_col"),
+                    actionButton("previewTransform", "Preview"),
+                    actionButton("applyTransform", "Apply"),
+                    verbatimTextOutput("transformMsg", placeholder = TRUE),
+                    tableOutput("transformPreview") %>% withSpinner()
+                ),
+                box(title = "Remove Column", status = "warning", solidHeader = TRUE, width = 6,
+                    selectInput("remove_col", "Select Column to Remove", choices = NULL),
+                    actionButton("removeColumn", "Remove Column"),
+                    helpText("Removing a column is permanent for this session."),
+                    tableOutput("downloadModifiedData") %>% withSpinner(),
+                    downloadButton("downloadModifiedDataCSV", "Download Modified Data")
                 )
               )
       ),
@@ -176,10 +233,9 @@ ui <- dashboardPage(
   )
 )
 
-# Define Server
 server <- function(input, output, session) {
   
-  # Initialize reactiveVal with the original data (filtered for non-NA islands)
+  # Initialize reactiveVal
   modifiedData <- reactiveVal({
     penguins %>% 
       filter(!is.na(island))
@@ -197,84 +253,99 @@ server <- function(input, output, session) {
     modifiedData(df)
   })
   
-  # --------------------- Dynamic Select Inputs ---------------------
-  # Update selectInput choices whenever modifiedData changes
+  # Update select inputs when data changes
   observe({
     df <- modifiedData()
     numeric_cols <- names(df)[sapply(df, is.numeric)]
     factor_cols <- names(df)[sapply(df, is.factor)]
     
-    # Update EDA Tab Select Inputs
-    updateSelectInput(session, "x_axis", choices = numeric_cols, selected = ifelse("bill_length_mm" %in% numeric_cols, "bill_length_mm", numeric_cols[1]))
-    updateSelectInput(session, "y_axis", choices = numeric_cols, selected = ifelse("bill_depth_mm" %in% numeric_cols, "bill_depth_mm", numeric_cols[2]))
-    updateSelectInput(session, "box_var", choices = numeric_cols, selected = ifelse("body_mass_g" %in% numeric_cols, "body_mass_g", numeric_cols[1]))
-    updateSelectInput(session, "hist_var", choices = numeric_cols, selected = ifelse("bill_length_mm" %in% numeric_cols, "bill_length_mm", numeric_cols[1]))
+    # EDA
+    updateSelectInput(session, "x_axis", choices = numeric_cols, selected = if("bill_length_mm" %in% numeric_cols) "bill_length_mm" else numeric_cols[1])
+    updateSelectInput(session, "y_axis", choices = numeric_cols, selected = if("bill_depth_mm" %in% numeric_cols) "bill_depth_mm" else numeric_cols[2])
+    updateSelectInput(session, "box_var", choices = numeric_cols, selected = if("body_mass_g" %in% numeric_cols) "body_mass_g" else numeric_cols[1])
+    updateSelectInput(session, "hist_var", choices = numeric_cols, selected = if("bill_length_mm" %in% numeric_cols) "bill_length_mm" else numeric_cols[1])
     
-    # Update Predictive Modeling Tab Select Inputs
-    updateSelectInput(session, "response_var", choices = numeric_cols, selected = ifelse("body_mass_g" %in% numeric_cols, "body_mass_g", numeric_cols[1]))
-    updateSelectInput(session, "predictor_vars", choices = numeric_cols, selected = setdiff(numeric_cols, "body_mass_g"))
+    # Model
+    updateSelectInput(session, "response_var", choices = c(numeric_cols, factor_cols), selected = if("body_mass_g" %in% numeric_cols) "body_mass_g" else numeric_cols[1])
+    updateSelectInput(session, "predictor_vars", choices = c(numeric_cols, factor_cols), selected = setdiff(numeric_cols, "body_mass_g"))
+    
+    # Transform/Remove column
+    updateSelectInput(session, "transform_col", choices = numeric_cols)
+    updateSelectInput(session, "remove_col", choices = names(df))
   })
-  # --------------------- End Dynamic Select Inputs ---------------------
   
-  # Debug Output to Check Columns
   output$debugFilteredData <- renderPrint({
-    str(modifiedData())
+    df <- modifiedData()
+    cat("Number of rows in filtered data:", nrow(df), "\n")
+    str(df)
   })
   
-  # --------------------- EDA Plots ---------------------
+  # Helper function to apply global alpha and shape where applicable
+  # For geoms that have "shape" and "alpha" parameters.
+  # We'll assume "shape" and "alpha" can be applied to point geoms.
+  apply_global_params <- function(p, use_points = FALSE) {
+    # If we are using points, set shape and alpha in geom_point
+    # We'll do this by modifying the geoms directly if possible.
+    # A simpler approach: when constructing the ggplot, incorporate alpha & shape arguments.
+    # If needed, we can re-build certain layers.
+    # Here we assume the caller sets them up initially.
+    p
+  }
   
   # Scatterplot
   output$scatterPlot <- renderPlotly({
     df <- modifiedData()
-    req(nrow(df) > 0)
-    req(input$x_axis, input$y_axis)  # Ensure inputs are available
+    validate(
+      need(nrow(df) > 0, "No data available."),
+      need(input$x_axis %in% names(df) & input$y_axis %in% names(df), "Check selected x/y variables.")
+    )
+    title <- ifelse(nchar(input$scatter_title) > 0, input$scatter_title, "Scatterplot")
     p <- ggplot(df, aes_string(x = input$x_axis, y = input$y_axis, color = "species")) +
-      geom_point() +
-      theme_gray() 
+      geom_point(alpha = input$global_alpha, shape = as.numeric(input$global_shape)) +
+      labs(title = title) +
+      theme_gray()
     ggplotly(p)
   })
   
-  # Download Scatterplot
   output$downloadScatter <- downloadHandler(
     filename = function() { paste("scatterplot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
       df <- modifiedData()
-      if(nrow(df) == 0){
-        showNotification("No data available for plotting.", type = "error")
-        return(NULL)
-      }
-      req(input$x_axis, input$y_axis)
+      if(nrow(df) == 0) return(NULL)
+      title <- ifelse(nchar(input$scatter_title) > 0, input$scatter_title, "Scatterplot")
       p <- ggplot(df, aes_string(x = input$x_axis, y = input$y_axis, color = "species")) +
-        geom_point() +
-        theme_gray() 
+        geom_point(alpha = input$global_alpha, shape = as.numeric(input$global_shape)) +
+        labs(title = title) +
+        theme_gray()
       ggsave(file, plot = p)
     }
   )
   
-  # Boxplot
+  # Boxplot (Alpha can apply to box but shape doesn't apply to a boxplot)
   output$boxPlot <- renderPlotly({
     df <- modifiedData()
-    req(nrow(df) > 0)
-    req(input$box_var)
+    validate(
+      need(nrow(df) > 0, "No data available for boxplot."),
+      need(input$box_var %in% names(df), "Selected box variable does not exist.")
+    )
+    title <- ifelse(nchar(input$box_title) > 0, input$box_title, "Boxplot")
     p <- ggplot(df, aes(x = species, y = .data[[input$box_var]], fill = species)) +
-      geom_boxplot() +
-      theme_gray() 
+      geom_boxplot(alpha = input$global_alpha) +
+      labs(title = title) +
+      theme_gray()
     ggplotly(p)
   })
   
-  # Download Boxplot
   output$downloadBox <- downloadHandler(
     filename = function() { paste("boxplot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
       df <- modifiedData()
-      if(nrow(df) == 0){
-        showNotification("No data available for plotting.", type = "error")
-        return(NULL)
-      }
-      req(input$box_var)
+      if(nrow(df) == 0) return(NULL)
+      title <- ifelse(nchar(input$box_title) > 0, input$box_title, "Boxplot")
       p <- ggplot(df, aes(x = species, y = .data[[input$box_var]], fill = species)) +
-        geom_boxplot() +
-        theme_gray() 
+        geom_boxplot(alpha = input$global_alpha) +
+        labs(title = title) +
+        theme_gray()
       ggsave(file, plot = p)
     }
   )
@@ -282,108 +353,101 @@ server <- function(input, output, session) {
   # Histogram/Density Plot
   output$histPlot <- renderPlotly({
     df <- modifiedData()
-    req(nrow(df) > 0)
-    req(input$hist_var)
+    validate(
+      need(nrow(df) > 0, "No data available."),
+      need(input$hist_var %in% names(df), "Selected histogram variable is not available.")
+    )
+    title <- ifelse(nchar(input$hist_title) > 0, input$hist_title, "Histogram/Density")
+    if(!is.numeric(df[[input$hist_var]])){
+      return(ggplotly(ggplot() + ggtitle("Selected variable is not numeric.")))
+    }
     p <- ggplot(df, aes_string(x = input$hist_var, fill = "species")) +
-      geom_histogram(alpha = 0.6, position = "identity", bins = 30) +
+      geom_histogram(alpha = input$global_alpha, position = "identity", bins = 30) +
+      labs(title = title) +
       theme_minimal()
     if(input$show_density){
-      p <- p + geom_density(aes(y = ..count..), alpha = 0.3)
+      p <- p + geom_density(aes(y = ..count..), alpha = input$global_alpha)
     }
     ggplotly(p)
   })
   
-  # Download Histogram
   output$downloadHist <- downloadHandler(
     filename = function() { paste("histogram-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
       df <- modifiedData()
-      if(nrow(df) == 0){
-        showNotification("No data available for plotting.", type = "error")
+      if(nrow(df) == 0) return(NULL)
+      if(!is.numeric(df[[input$hist_var]])){
+        showNotification("Selected variable not numeric.", type = "error")
         return(NULL)
       }
-      req(input$hist_var)
+      title <- ifelse(nchar(input$hist_title) > 0, input$hist_title, "Histogram/Density")
       p <- ggplot(df, aes_string(x = input$hist_var, fill = "species")) +
-        geom_histogram(alpha = 0.6, position = "identity", bins = 30) +
-        theme_gray() 
+        geom_histogram(alpha = input$global_alpha, position = "identity", bins = 30) +
+        labs(title = title) +
+        theme_gray()
       if(input$show_density){
-        p <- p + geom_density(aes(y = ..count..), alpha = 0.3)
+        p <- p + geom_density(aes(y = ..count..), alpha = input$global_alpha)
       }
       ggsave(file, plot = p)
     }
   )
   
-  # Correlation Heatmap using ggplot2 instead of fviz_correlation
+  # Correlation Heatmap (No shape, but alpha can apply to geom_tile)
   output$corrHeatmap <- renderPlotly({
-    df <- modifiedData() %>% 
-      select_if(is.numeric) %>% 
-      na.omit()
-    req(nrow(df) > 1)
-    
-    # Calculate correlation matrix
+    df <- modifiedData() %>% select_if(is.numeric) %>% na.omit()
+    validate(
+      need(ncol(df) > 1, "Not enough numeric columns."),
+      need(nrow(df) > 1, "Not enough rows after NA removal.")
+    )
+    title <- ifelse(nchar(input$corr_title) > 0, input$corr_title, "Correlation Heatmap")
     corr <- cor(df)
-    
-    # Melt the correlation matrix for ggplot2
     corr_melt <- melt(corr)
-    
-    # Create ggplot2 heatmap
     p <- ggplot(corr_melt, aes(x = Var1, y = Var2, fill = value)) +
-      geom_tile(color = "white") +
+      geom_tile(color = "white", alpha = input$global_alpha) +
       scale_fill_gradient2(low = "blue", high = "red", mid = "white",
                            midpoint = 0, limit = c(-1,1), space = "Lab",
                            name="Correlation") +
+      labs(title = title) +
       theme_minimal() + 
       theme(axis.text.x = element_text(angle = 45, vjust = 1, 
                                        size = 12, hjust = 1)) +
       coord_fixed()
-    
     ggplotly(p)
   })
   
-  # Download Correlation Heatmap
   output$downloadCorr <- downloadHandler(
     filename = function() { paste("correlation-heatmap-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
-      df <- modifiedData() %>% 
-        select_if(is.numeric) %>% 
-        na.omit()
-      if(nrow(df) <=1 ){
+      df <- modifiedData() %>% select_if(is.numeric) %>% na.omit()
+      if(ncol(df) <= 1 || nrow(df) <= 1){
         showNotification("Not enough data for correlation heatmap.", type = "error")
         return(NULL)
       }
-      
-      # Calculate correlation matrix
+      title <- ifelse(nchar(input$corr_title) > 0, input$corr_title, "Correlation Heatmap")
       corr <- cor(df)
-      
-      # Melt the correlation matrix for ggplot2
       corr_melt <- melt(corr)
-      
-      # Create ggplot2 heatmap
       p <- ggplot(corr_melt, aes(x = Var1, y = Var2, fill = value)) +
-        geom_tile(color = "white") +
+        geom_tile(color = "white", alpha = input$global_alpha) +
         scale_fill_gradient2(low = "blue", high = "red", mid = "white",
                              midpoint = 0, limit = c(-1,1), space = "Lab",
                              name="Correlation") +
-        theme_gray() 
+        labs(title = title) +
+        theme_gray() +
         theme(axis.text.x = element_text(angle = 45, vjust = 1, 
                                          size = 12, hjust = 1)) +
         coord_fixed()
-      
       ggsave(file, plot = p)
     }
   )
   
-  # --------------------- Summary Statistics ---------------------
-  
-  # Conditional Summary Statistics based on Variable Type
+  # Summary (no plot)
   output$summaryTable <- renderTable({
     df <- modifiedData()
-    req(nrow(df) > 0)
-    
-    # Initialize an empty list to store summaries
+    validate(
+      need(nrow(df) > 0, "No data available for summary.")
+    )
     summary_list <- lapply(names(df), function(var){
       if(is.numeric(df[[var]])){
-        # Numerical Summary
         mean_val <- mean(df[[var]], na.rm = TRUE)
         sd_val <- sd(df[[var]], na.rm = TRUE)
         median_val <- median(df[[var]], na.rm = TRUE)
@@ -401,7 +465,6 @@ server <- function(input, output, session) {
           stringsAsFactors = FALSE
         )
       } else if(is.factor(df[[var]])){
-        # Categorical Summary
         counts <- table(df[[var]])
         counts_str <- paste(names(counts), counts, sep=": ", collapse=", ")
         data.frame(
@@ -417,18 +480,11 @@ server <- function(input, output, session) {
         )
       }
     })
-    
-    # Combine all summaries into a single data frame
-    summary_df <- bind_rows(summary_list)
-    
-    # Arrange the summary_df for better readability
-    summary_df <- summary_df %>%
+    summary_df <- bind_rows(summary_list) %>%
       select(Variable, Type, Mean, SD, Median, Min, Max, Counts)
-    
-    return(summary_df)
-  }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+    summary_df
+  })
   
-  # Download Conditional Summary
   output$downloadSummary <- downloadHandler(
     filename = function() { paste("summary-", Sys.Date(), ".csv", sep = "") },
     content = function(file) {
@@ -436,10 +492,8 @@ server <- function(input, output, session) {
       if(nrow(df) == 0){
         write.csv(data.frame(Error = "No data available for summary."), file, row.names = FALSE)
       } else {
-        # Initialize an empty list to store summaries
         summary_list <- lapply(names(df), function(var){
           if(is.numeric(df[[var]])){
-            # Numerical Summary
             mean_val <- mean(df[[var]], na.rm = TRUE)
             sd_val <- sd(df[[var]], na.rm = TRUE)
             median_val <- median(df[[var]], na.rm = TRUE)
@@ -457,7 +511,6 @@ server <- function(input, output, session) {
               stringsAsFactors = FALSE
             )
           } else if(is.factor(df[[var]])){
-            # Categorical Summary
             counts <- table(df[[var]])
             counts_str <- paste(names(counts), counts, sep=": ", collapse=", ")
             data.frame(
@@ -474,11 +527,7 @@ server <- function(input, output, session) {
           }
         })
         
-        # Combine all summaries into a single data frame
-        summary_df <- bind_rows(summary_list)
-        
-        # Arrange the summary_df for better readability
-        summary_df <- summary_df %>%
+        summary_df <- bind_rows(summary_list) %>%
           select(Variable, Type, Mean, SD, Median, Min, Max, Counts)
         
         write.csv(summary_df, file, row.names = FALSE)
@@ -486,242 +535,488 @@ server <- function(input, output, session) {
     }
   )
   
-  # --------------------- Predictive Modeling ---------------------
-  
-  # Reactive expression for model training
-  trainedModel <- eventReactive(input$runModel, {
+  # Predictive Modeling (no changes to add shape/alpha since we don't have a plot with points here except varImpPlot)
+  model_data <- reactive({
     df <- modifiedData()
-    req(nrow(df) > 0)
     req(input$response_var, input$predictor_vars)
-    
-    # Prevent selecting the response variable as a predictor
-    if(input$response_var %in% input$predictor_vars){
-      showNotification("Response variable cannot be a predictor. Please adjust your selections.", type = "error")
+    if(!input$response_var %in% names(df) || length(input$predictor_vars) == 0){
+      return(NULL)
+    }
+    df <- df %>% select(all_of(c(input$response_var, input$predictor_vars))) %>% na.omit()
+    df
+  })
+  
+  trainedModel <- eventReactive(input$runModel, {
+    df <- model_data()
+    if(is.null(df) || nrow(df) < 5){
+      showNotification("Not enough data or no valid predictors/response for modeling.", type = "error")
       return(NULL)
     }
     
-    # Define formula
+    if(input$response_var %in% input$predictor_vars){
+      showNotification("Response variable cannot be a predictor. Adjust selections.", type = "error")
+      return(NULL)
+    }
+    
+    response_is_factor <- is.factor(df[[input$response_var]])
+    set.seed(123)
+    train_index <- createDataPartition(df[[input$response_var]], p = input$train_ratio, list = FALSE)
+    train_df <- df[train_index, ]
+    test_df <- df[-train_index, ]
+    
     formula <- as.formula(paste(input$response_var, "~", paste(input$predictor_vars, collapse = "+")))
     
-    # Set up cross-validation if selected
-    if(input$use_cv){
-      train_control <- trainControl(method = "cv", number = 5)
-    } else {
-      train_control <- trainControl(method = "none")
-    }
+    train_method <- ifelse(input$use_cv, "cv", "none")
+    train_control <- trainControl(method = train_method, number = ifelse(input$use_cv, 5, 1), 
+                                  classProbs = response_is_factor, 
+                                  summaryFunction = if(response_is_factor) multiClassSummary else defaultSummary)
     
-    # Train the model based on selected type
-    if(input$model_type == "Linear Regression"){
-      model <- train(formula, data = df, method = "lm", trControl = train_control)
-    } else if(input$model_type == "Random Forest"){
-      model <- train(formula, data = df, method = "rf", trControl = train_control, importance = TRUE)
-    }
+    model_method <- switch(input$model_type,
+                           "Linear Regression" = "lm",
+                           "Generalized Linear Model" = "glm",
+                           "Random Forest" = "rf",
+                           "Gradient Boosting" = "gbm")
     
-    return(model)
+    model <- tryCatch({
+      train(formula, data = train_df, method = model_method, trControl = train_control, 
+            preProcess = c("center", "scale"),
+            metric = if(response_is_factor) "Accuracy" else "RMSE")
+    }, error = function(e) {
+      showNotification(paste("Error training model:", e$message), type = "error")
+      return(NULL)
+    })
+    
+    if(is.null(model)) return(NULL)
+    
+    list(
+      model = model,
+      train_df = train_df,
+      test_df = test_df,
+      response_type = if(response_is_factor) "classification" else "regression"
+    )
   })
   
-  # Display Model Output
   output$modelOutput <- renderPrint({
-    model <- trainedModel()
-    req(model)
-    print(model)
+    model_info <- trainedModel()
+    validate(
+      need(!is.null(model_info), "No model trained yet. Click 'Run Model'.")
+    )
+    model_info$model
   })
   
-  # Download Model Summary
   output$downloadModel <- downloadHandler(
     filename = function() { paste("model-summary-", Sys.Date(), ".txt", sep = "") },
     content = function(file) {
-      model <- trainedModel()
-      if (is.null(model)) {
+      model_info <- trainedModel()
+      if (is.null(model_info)) {
         writeLines("No model has been generated yet.", con = file)
       } else {
         sink(file)
-        print(model)
+        print(model_info$model)
         sink()
       }
     }
   )
   
-  # Generate Diagnostic Plots for Linear Regression
-  observeEvent(input$runModel, {
-    req(input$model_type)
-    if(input$model_type == "Linear Regression"){
-      model <- trainedModel()
-      req(model)
-      
-      # Residuals vs Fitted
-      output$residualsPlot <- renderPlotly({
-        residuals <- resid(model$finalModel)
-        fitted <- fitted(model$finalModel)
-        p <- ggplot(data = NULL, aes(x = fitted, y = residuals)) +
-          geom_point(alpha = 0.6) +
-          geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
-          labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
-          theme_minimal()
-        ggplotly(p)
-      })
-      
-      # Normal Q-Q Plot
-      output$qqPlot <- renderPlotly({
-        residuals <- resid(model$finalModel)
-        qq <- qqnorm(residuals, plot.it = FALSE)
-        qq_df <- data.frame(theoretical = qq$x, sample = qq$y)
-        p <- ggplot(qq_df, aes(x = theoretical, y = sample)) +
-          geom_point(alpha = 0.6) +
-          geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
-          labs(title = "Normal Q-Q", x = "Theoretical Quantiles", y = "Sample Quantiles") +
-          theme_minimal()
-        ggplotly(p)
-      })
-      
-      # Actual vs Predicted Plot
-      output$actualPredictedPlot <- renderPlotly({
-        df <- modifiedData()
-        actual <- df[[input$response_var]]
-        predicted <- predict(model, df)
-        p <- ggplot(data = NULL, aes(x = actual, y = predicted)) +
-          geom_point(alpha = 0.6) +
-          geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
-          labs(title = "Actual vs Predicted", x = "Actual Values", y = "Predicted Values") +
-          theme_minimal()
-        ggplotly(p)
-      })
+  output$modelPerformance <- renderPrint({
+    model_info <- trainedModel()
+    validate(
+      need(!is.null(model_info), "No model trained yet. Click 'Run Model'.")
+    )
+    title <- ifelse(nchar(input$modelperf_title) > 0, input$modelperf_title, "Model Performance")
+    cat(title, "\n")
+    model <- model_info$model
+    test_df <- model_info$test_df
+    
+    preds <- predict(model, newdata = test_df)
+    obs <- test_df[[input$response_var]]
+    
+    if(model_info$response_type == "regression"){
+      rmse_val <- sqrt(mean((obs - preds)^2))
+      mae_val <- mean(abs(obs - preds))
+      r2_val <- cor(obs, preds)^2
+      cat("RMSE:", round(rmse_val, 3), "\n")
+      cat("MAE:", round(mae_val, 3), "\n")
+      cat("R²:", round(r2_val, 3), "\n")
     } else {
-      # Remove diagnostic plots if not Linear Regression
-      output$residualsPlot <- renderPlotly(NULL)
-      output$qqPlot <- renderPlotly(NULL)
-      output$actualPredictedPlot <- renderPlotly(NULL)
+      confusion <- confusionMatrix(preds, obs)
+      cat("Accuracy:", round(confusion$overall["Accuracy"], 3), "\n")
+      cat("Kappa:", round(confusion$overall["Kappa"], 3), "\n")
+      cat("\nConfusion Matrix:\n")
+      print(confusion$table)
     }
   })
   
-  # --------------------- PCA & Clustering ---------------------
+  output$varImpPlot <- renderPlotly({
+    model_info <- trainedModel()
+    req(model_info)
+    model <- model_info$model
+    title <- ifelse(nchar(input$varimp_title) > 0, input$varimp_title, "Variable Importance")
+    if(input$model_type %in% c("Random Forest", "Gradient Boosting")){
+      imp <- varImp(model)$importance
+      imp_df <- data.frame(Variable = rownames(imp), Importance = imp[,1], stringsAsFactors = FALSE)
+      p <- ggplot(imp_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+        geom_bar(stat = "identity", fill = "steelblue", alpha = input$global_alpha) +
+        coord_flip() +
+        labs(title = title, x = "Variables", y = "Importance") +
+        theme_minimal()
+      ggplotly(p)
+    } else {
+      return(NULL)
+    }
+  })
   
-  # PCA Plot
+  # Linear Regression Diagnostics
+  observeEvent(input$runModel, {
+    model_info <- trainedModel()
+    
+    output$residualsPlot <- renderPlotly({
+      validate(
+        need(!is.null(model_info), "No model trained yet."),
+        need(input$model_type == "Linear Regression", "Diagnostics only for Linear Regression.")
+      )
+      title <- ifelse(nchar(input$resid_title) > 0, input$resid_title, "Residuals vs Fitted")
+      model <- model_info$model$finalModel
+      residuals <- resid(model)
+      fitted <- fitted(model)
+      p <- ggplot(data = NULL, aes(x = fitted, y = residuals)) +
+        geom_point(alpha = input$global_alpha, shape = as.numeric(input$global_shape)) +
+        geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+        labs(title = title, x = "Fitted Values", y = "Residuals") +
+        theme_minimal()
+      ggplotly(p)
+    })
+    
+    output$qqPlot <- renderPlotly({
+      validate(
+        need(!is.null(model_info), "No model trained yet."),
+        need(input$model_type == "Linear Regression", "Diagnostics only for Linear Regression.")
+      )
+      title <- ifelse(nchar(input$qq_title) > 0, input$qq_title, "Normal Q-Q")
+      model <- model_info$model$finalModel
+      residuals <- resid(model)
+      qq <- qqnorm(residuals, plot.it = FALSE)
+      qq_df <- data.frame(theoretical = qq$x, sample = qq$y)
+      p <- ggplot(qq_df, aes(x = theoretical, y = sample)) +
+        geom_point(alpha = input$global_alpha, shape = as.numeric(input$global_shape)) +
+        geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+        labs(title = title, x = "Theoretical Quantiles", y = "Sample Quantiles") +
+        theme_minimal()
+      ggplotly(p)
+    })
+    
+    output$actualPredictedPlot <- renderPlotly({
+      validate(
+        need(!is.null(model_info), "No model trained yet."),
+        need(input$model_type == "Linear Regression", "Diagnostics only for Linear Regression.")
+      )
+      title <- ifelse(nchar(input$ap_title) > 0, input$ap_title, "Actual vs Predicted")
+      df <- model_info$train_df
+      actual <- df[[input$response_var]]
+      predicted <- predict(model_info$model, df)
+      p <- ggplot(data = NULL, aes(x = actual, y = predicted)) +
+        geom_point(alpha = input$global_alpha, shape = as.numeric(input$global_shape)) +
+        geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+        labs(title = title, x = "Actual Values", y = "Predicted Values") +
+        theme_minimal()
+      ggplotly(p)
+    })
+  })
+  
+  # Column Modifications
+  observeEvent(input$modifyColumn, {
+    req(input$new_column_name, input$column_formula)
+    df <- modifiedData()
+    new_col <- try(eval(parse(text = input$column_formula), envir = df), silent = TRUE)
+    
+    if (inherits(new_col, "try-error")) {
+      showNotification("Error in evaluating the formula. Please check the syntax.", type = "error")
+    } else {
+      if(input$new_column_name %in% names(df)){
+        showNotification("Column name already exists. Please choose a different name.", type = "error")
+      } else {
+        df <- df %>% mutate(!!input$new_column_name := new_col)
+        modifiedData(df)
+        output$modifiedData <- renderTable({
+          head(df, 10)
+        }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+        
+        output$downloadModifiedData <- renderTable({
+          head(df, 10)
+        }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+        
+        showNotification("Column added/modified successfully.", type = "message")
+      }
+    }
+  })
+  
+  transformPreviewData <- reactiveVal(NULL)
+  
+  observeEvent(input$previewTransform, {
+    req(input$transform_col, input$transform_type)
+    df <- modifiedData()
+    col_data <- df[[input$transform_col]]
+    transformed <- NULL
+    msg <- NULL
+    if(input$transform_type == "None"){
+      transformed <- col_data
+      msg <- "No transformation applied."
+    } else if(input$transform_type == "Log (natural)"){
+      if(any(col_data <= 0, na.rm = TRUE)){
+        msg <- "Log transformation not applicable: column contains non-positive values."
+        transformed <- NULL
+      } else {
+        transformed <- log(col_data)
+        msg <- "Log transformation applied."
+      }
+    } else if(input$transform_type == "Square Root"){
+      if(any(col_data < 0, na.rm = TRUE)){
+        msg <- "Square root not applicable: column contains negative values."
+        transformed <- NULL
+      } else {
+        transformed <- sqrt(col_data)
+        msg <- "Square root transformation applied."
+      }
+    } else if(input$transform_type == "Standard Scale"){
+      transformed <- scale(col_data)
+      msg <- "Standard scaling applied."
+    }
+    
+    transformPreviewData(list(transformed = transformed, msg = msg))
+  })
+  
+  output$transformPreview <- renderTable({
+    preview <- transformPreviewData()
+    req(preview)
+    if(is.null(preview$transformed)){
+      return(data.frame(Message = "No preview available due to error."))
+    } else {
+      data.frame(Original = modifiedData()[[input$transform_col]][1:10],
+                 Transformed = preview$transformed[1:10])
+    }
+  }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+  
+  output$transformMsg <- renderText({
+    preview <- transformPreviewData()
+    req(preview)
+    preview$msg
+  })
+  
+  observeEvent(input$applyTransform, {
+    preview <- transformPreviewData()
+    req(preview)
+    if(is.null(preview$transformed)){
+      showNotification("Cannot apply transformation due to previous error.", type = "error")
+      return()
+    }
+    df <- modifiedData()
+    new_col_name <- input$transformed_col_name
+    if(new_col_name %in% names(df)){
+      showNotification("Column name already exists. Please choose a different name.", type = "error")
+      return()
+    }
+    df <- df %>% mutate(!!new_col_name := as.numeric(preview$transformed))
+    modifiedData(df)
+    showNotification("Transformation applied successfully.", type = "message")
+    
+    output$downloadModifiedData <- renderTable({
+      head(df, 10)
+    }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+  })
+  
+  # Remove Column
+  observeEvent(input$removeColumn, {
+    df <- modifiedData()
+    req(input$remove_col, input$remove_col %in% names(df))
+    df <- df %>% select(-all_of(input$remove_col))
+    modifiedData(df)
+    showNotification(paste("Column", input$remove_col, "removed."), type = "message")
+    
+    output$downloadModifiedData <- renderTable({
+      head(df, 10)
+    }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+  })
+  
+  # Download Data
+  output$downloadData <- downloadHandler(
+    filename = function() { paste("filtered-data-", Sys.Date(), ".csv", sep = "") },
+    content = function(file) {
+      df <- modifiedData()
+      write.csv(df, file, row.names = FALSE)
+    }
+  )
+  
+  output$downloadModifiedData <- renderTable({
+    df <- modifiedData()
+    head(df, 10)
+  }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+  
+  output$downloadModifiedDataCSV <- downloadHandler(
+    filename = function() { paste("modified-data-", Sys.Date(), ".csv", sep = "") },
+    content = function(file) {
+      write.csv(modifiedData(), file, row.names = FALSE)
+    }
+  )
+  
+  # PCA and Clustering with alpha and shape
   pca_data <- reactive({
-    df <- modifiedData() %>% 
-      select_if(is.numeric) %>% 
-      na.omit()
-    req(nrow(df) > 0)
-    if(input$normalize_pca){
+    df <- modifiedData() %>% select_if(is.numeric) %>% na.omit()
+    if(input$normalize_pca && nrow(df) > 0){
       df <- scale(df)
     }
-    pca_res <- prcomp(df, center = TRUE, scale. = FALSE)
-    return(list(pca = pca_res, data = df))
+    df
   })
   
   output$pcaPlot <- renderPlotly({
-    pca_res <- pca_data()$pca
-    df <- pca_data()$data
-    species <- modifiedData()$species[complete.cases(df)]
-    
-    p <- fviz_pca_biplot(pca_res, geom = "point", habillage = species, addEllipses = TRUE) +
-      theme_minimal()
+    df <- pca_data()
+    validate(
+      need(nrow(df) > 1, "Not enough data for PCA.")
+    )
+    pca_res <- prcomp(df, center = TRUE, scale. = FALSE)
+    species <- modifiedData()$species[complete.cases(modifiedData()[,sapply(modifiedData(), is.numeric)])]
+    title <- ifelse(nchar(input$pca_title) > 0, input$pca_title, "PCA Biplot")
+    # fviz_pca_biplot doesn't have a direct alpha/shape param for points,
+    # but we can extract the data and re-plot with ggplot if needed.
+    # Alternatively, we can customize the resulting plot with ggplot2 code.
+    # We'll use ggplot2 approach:
+    p <- fviz_pca_biplot(pca_res, geom = "point", habillage = species, addEllipses = TRUE)
+    # Extract the ggplot from fviz
+    p <- p + labs(title = title)
+    # Modify layers to apply alpha/shape to points:
+    # fviz_pca_biplot creates points with geom_point(). We can override with theme or scale.
+    # We'll do a trick: layers in p:
+    # Find the point layer and set shape/alpha:
+    p$layers[[1]]$aes_params$alpha <- input$global_alpha
+    p$layers[[1]]$aes_params$shape <- as.numeric(input$global_shape)
     ggplotly(p)
   })
   
-  # Download PCA Plot
   output$downloadPCA <- downloadHandler(
     filename = function() { paste("pca-plot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
-      pca_res <- pca_data()$pca
-      df <- pca_data()$data
-      species <- modifiedData()$species[complete.cases(df)]
-      
+      df <- pca_data()
+      if(nrow(df) <= 1){
+        showNotification("Not enough data for PCA plot.", type = "error")
+        return(NULL)
+      }
+      pca_res <- prcomp(df, center = TRUE, scale. = FALSE)
+      species <- modifiedData()$species[complete.cases(modifiedData()[,sapply(modifiedData(), is.numeric)])]
+      title <- ifelse(nchar(input$pca_title) > 0, input$pca_title, "PCA Biplot")
       p <- fviz_pca_biplot(pca_res, geom = "point", habillage = species, addEllipses = TRUE) +
-        theme_gray() 
+        labs(title = title)
+      p$layers[[1]]$aes_params$alpha <- input$global_alpha
+      p$layers[[1]]$aes_params$shape <- as.numeric(input$global_shape)
       ggsave(file, plot = p)
     }
   )
   
-  # Scree Plot
   output$screePlot <- renderPlotly({
-    pca_res <- pca_data()$pca
+    df <- pca_data()
+    validate(
+      need(nrow(df) > 1, "Not enough data for Scree plot.")
+    )
+    pca_res <- prcomp(df, center = TRUE, scale. = FALSE)
+    title <- ifelse(nchar(input$scree_title) > 0, input$scree_title, "PCA Scree Plot")
     p <- fviz_eig(pca_res, addlabels = TRUE, ylim = c(0, 100)) +
-      theme_gray() 
+      labs(title = title) +
+      theme_gray()
     ggplotly(p)
   })
   
-  # Download Scree Plot
   output$downloadScree <- downloadHandler(
     filename = function() { paste("scree-plot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
-      pca_res <- pca_data()$pca
+      df <- pca_data()
+      if(nrow(df) <= 1){
+        showNotification("Not enough data for Scree plot.", type = "error")
+        return(NULL)
+      }
+      pca_res <- prcomp(df, center = TRUE, scale. = FALSE)
+      title <- ifelse(nchar(input$scree_title) > 0, input$scree_title, "PCA Scree Plot")
       p <- fviz_eig(pca_res, addlabels = TRUE, ylim = c(0, 100)) +
-        theme_gray() 
+        labs(title = title) +
+        theme_gray()
       ggsave(file, plot = p)
     }
   )
   
-  # Clustering Plot
   clustering_data <- reactive({
     df <- modifiedData() %>% 
       select_if(is.numeric) %>% 
       na.omit()
-    req(nrow(df) > 1)
-    if(input$normalize_pca){
-      df_scaled <- scale(df)
-    } else {
-      df_scaled <- df
+    if(input$normalize_pca && nrow(df) > 0){
+      df <- scale(df)
     }
-    return(df_scaled)
+    df
   })
   
   output$clusterPlot <- renderPlotly({
     df_scaled <- clustering_data()
+    validate(
+      need(nrow(df_scaled) > 1, "Not enough data for clustering plot.")
+    )
     algo <- input$clust_algo
+    title <- ifelse(nchar(input$cluster_title) > 0, input$cluster_title, "Clustering Plot")
     
     if(algo == "K-Means"){
       set.seed(123)
       kmeans_res <- kmeans(df_scaled, centers = input$num_clusters)
       p <- fviz_cluster(kmeans_res, data = df_scaled, geom = "point", ellipse.type = "norm", 
-                        habillage = modifiedData()$species[complete.cases(clustering_data())]) +
-        theme_minimal()
-    } else if(algo == "Hierarchical"){
+                        habillage = modifiedData()$species[complete.cases(clustering_data())])
+    } else {
       dist_mat <- dist(df_scaled)
       hc <- hclust(dist_mat, method = "ward.D2")
       clusters <- cutree(hc, k = input$num_clusters)
       p <- fviz_cluster(list(data = df_scaled, cluster = clusters), geom = "point",
                         ellipse.type = "norm", 
-                        habillage = modifiedData()$species[complete.cases(clustering_data())]) +
-        theme_minimal()
+                        habillage = modifiedData()$species[complete.cases(clustering_data())])
     }
-    
+    # Modify point layers in p:
+    p <- p + labs(title = title)
+    p$layers[[1]]$aes_params$alpha <- input$global_alpha
+    p$layers[[1]]$aes_params$shape <- as.numeric(input$global_shape)
     ggplotly(p)
   })
   
-  # Download Clustering Plot
   output$downloadCluster <- downloadHandler(
     filename = function() { paste("cluster-plot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
       df_scaled <- clustering_data()
+      if(nrow(df_scaled) <= 1){
+        showNotification("Not enough data for cluster plot.", type = "error")
+        return(NULL)
+      }
       algo <- input$clust_algo
+      title <- ifelse(nchar(input$cluster_title) > 0, input$cluster_title, "Clustering Plot")
       
       if(algo == "K-Means"){
         set.seed(123)
         kmeans_res <- kmeans(df_scaled, centers = input$num_clusters)
         p <- fviz_cluster(kmeans_res, data = df_scaled, geom = "point", ellipse.type = "norm", 
-                          habillage = modifiedData()$species[complete.cases(clustering_data())]) +
-          theme_minimal()
-      } else if(algo == "Hierarchical"){
+                          habillage = modifiedData()$species[complete.cases(clustering_data())])
+      } else {
         dist_mat <- dist(df_scaled)
         hc <- hclust(dist_mat, method = "ward.D2")
         clusters <- cutree(hc, k = input$num_clusters)
         p <- fviz_cluster(list(data = df_scaled, cluster = clusters), geom = "point",
                           ellipse.type = "norm", 
-                          habillage = modifiedData()$species[complete.cases(clustering_data())]) +
-          theme_gray() 
+                          habillage = modifiedData()$species[complete.cases(clustering_data())])
       }
-      
+      p <- p + labs(title = title)
+      p$layers[[1]]$aes_params$alpha <- input$global_alpha
+      p$layers[[1]]$aes_params$shape <- as.numeric(input$global_shape)
       ggsave(file, plot = p)
     }
   )
   
-  # Clustering Metrics
   output$clusterMetrics <- renderTable({
     df_scaled <- clustering_data()
+    validate(
+      need(nrow(df_scaled) > 1, "Not enough data for clustering metrics.")
+    )
+    title <- ifelse(nchar(input$metrics_title) > 0, input$metrics_title, "Clustering Metrics")
+    cat(title, "\n")
     algo <- input$clust_algo
-    req(nrow(df_scaled) > 1)
-    
     if(algo == "K-Means"){
       set.seed(123)
       kmeans_res <- kmeans(df_scaled, centers = input$num_clusters)
@@ -732,7 +1027,7 @@ server <- function(input, output, session) {
         Value = c(kmeans_res$tot.withinss, round(avg_sil, 3)),
         stringsAsFactors = FALSE
       )
-    } else if(algo == "Hierarchical"){
+    } else {
       dist_mat <- dist(df_scaled)
       hc <- hclust(dist_mat, method = "ward.D2")
       clusters <- cutree(hc, k = input$num_clusters)
@@ -744,72 +1039,8 @@ server <- function(input, output, session) {
         stringsAsFactors = FALSE
       )
     }
-    return(df_metrics)
+    df_metrics
   })
-  
-  # --------------------- Column Modifier ---------------------
-  
-  observeEvent(input$modifyColumn, {
-    req(input$new_column_name, input$column_formula)
-    df <- modifiedData()
-    
-    # Safely evaluate the formula within the context of df
-    new_col <- try(eval(parse(text = input$column_formula), envir = df), silent = TRUE)
-    
-    if (inherits(new_col, "try-error")) {
-      showNotification("Error in evaluating the formula. Please check the syntax.", type = "error")
-    } else {
-      # Ensure the new column name doesn't conflict with existing names
-      if(input$new_column_name %in% names(df)){
-        showNotification("Column name already exists. Please choose a different name.", type = "error")
-      } else {
-        df <- df %>% mutate(!!input$new_column_name := new_col)
-        modifiedData(df)
-        
-        # Update the data tables
-        output$modifiedData <- renderTable({
-          df_display <- df %>% head(10)  # Display only the first 10 rows for brevity
-          df_display
-        }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
-        
-        output$downloadModifiedData <- renderTable({
-          df_display <- df %>% head(10)  # Display only the first 10 rows for brevity
-          df_display
-        }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
-        
-        # Enable download of modified data
-        output$downloadModifiedDataCSV <- downloadHandler(
-          filename = function() { paste("modified-data-", Sys.Date(), ".csv", sep = "") },
-          content = function(file) {
-            write.csv(df, file, row.names = FALSE)
-          }
-        )
-        
-        showNotification("Column added/modified successfully.", type = "message")
-      }
-    }
-  })
-  
-  # --------------------- Download Data ---------------------
-  
-  # Download Filtered Data
-  output$downloadData <- downloadHandler(
-    filename = function() { paste("filtered-data-", Sys.Date(), ".csv", sep = "") },
-    content = function(file) {
-      df <- modifiedData()
-      write.csv(df, file, row.names = FALSE)
-    }
-  )
-  
-  # --------------------- Interactive Data Table ---------------------
-  
-  output$downloadModifiedData <- renderTable({
-    df <- modifiedData()
-    df_display <- df %>% head(10)  # Display only the first 10 rows for brevity
-    df_display
-  }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
-  
 }
 
-# Run the application 
 shinyApp(ui = ui, server = server)
