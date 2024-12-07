@@ -100,9 +100,19 @@ fviz_eig(pca_res, addlabels = TRUE, ylim = c(0, 100)) +
 
 ### Interpretation:
 
-- **PC1:** Explains the highest variance, primarily influenced by variables like flipper length and body mass.
-- **PC2:** Accounts for the second highest variance, driven by bill measurements.
-- **Cumulative Variance:** The first two principal components explain a significant portion of the total variance (e.g., 80%), suggesting they capture the most critical information.
+-   **PC1 (59.1% Variance Explained):**\
+    The first principal component captures the largest portion of variance in the dataset (59.1%), primarily influenced by variables like **flipper length** and **body mass**, which are strongly correlated with overall penguin size and weight.
+
+<!-- -->
+
+-   **PC2 (21% Variance Explained):**\
+    The second principal component accounts for an additional 21% of the variance, mainly driven by **bill measurements** (bill length and depth). This component likely captures variation related to penguin species and dietary adaptations.
+
+-   **Cumulative Variance:**\
+    The first two principal components together explain **80.1% of the total variance**, indicating they capture most of the critical information in the dataset. This suggests that these two components are sufficient for dimensionality reduction while retaining essential variability in the data.
+
+-   **PC3 to PC5 (Remaining Variance):**\
+    The remaining components (PC3, PC4, and PC5) contribute progressively less to the explained variance, with PC5 contributing virtually nothing. These components are less significant and likely capture noise or very specific, minor variations in the data.
 
 # PCA Biplot with Species Labels
 
@@ -121,8 +131,41 @@ fviz_pca_biplot(pca_res,
 
 ### Interpretation:
 
-- **Species Separation:** Different penguin species cluster distinctly in the PCA space, indicating that the principal components effectively capture species-specific traits.
-- **Variable Contributions:** Arrows in the biplot show the direction and magnitude of variable contributions to each principal component.
+-   <div>
+
+    #### **Species Separation:**
+
+    </div>
+
+    -   The PCA biplot shows clear clustering of the three penguin species (**Adelie**, **Chinstrap**, and **Gentoo**) in the PCA space, suggesting that the principal components effectively distinguish species-specific traits.
+
+        -   **Adelie Penguins (Blue):** Cluster near the center-left, characterized by smaller body mass and shorter flipper lengths.
+
+        -   **Chinstrap Penguins (Yellow):** Overlap slightly with Adelie but are positioned closer to the center, reflecting intermediate trait values.
+
+        -   **Gentoo Penguins (Gray):** Form a distinct cluster to the far right, indicating larger body mass and longer flipper lengths.
+
+    #### **Variable Contributions:**
+
+    -   The arrows represent the contributions of variables to the principal components:
+
+        -   **Flipper Length (Dim1):** Strongly aligned with Dim1, indicating that it contributes significantly to the first principal component and is positively correlated with body mass.
+
+        -   **Body Mass (Dim1):** Similarly contributes heavily to Dim1, highlighting its importance in explaining the variance in penguin size.
+
+        -   **Bill Length and Bill Depth (Dim2):** These variables contribute more to Dim2, indicating they capture species-specific differences not fully explained by body size.
+
+        -   **BMI (Dim2):** Points in a different direction, suggesting it explains variance orthogonal to size-related traits.
+
+    #### **Principal Component Contributions:**
+
+    -   **Dim1 (59.1% Variance Explained):** Primarily explains variation in penguin size, driven by flipper length and body mass.
+
+    -   **Dim2 (21% Variance Explained):** Captures differences related to bill characteristics, helping separate species with similar body sizes.
+
+    ### Summary:
+
+    The PCA biplot effectively visualizes the separation of penguin species based on their morphological traits. **Gentoo Penguins** are distinct due to their larger size, while **Adelie** and **Chinstrap Penguins** show more overlap, with slight distinctions driven by bill characteristics. The contributions of flipper length, body mass, and bill dimensions to the principal components align well with biological expectations.
 
 # K-Means Clustering
 
@@ -138,7 +181,14 @@ fviz_nbclust(numerical_data_scaled, kmeans, method = "wss") +
 
 ### Interpretation:
 
-- **Elbow Point:** The plot suggests that 3 clusters are optimal, corresponding to the three penguin species.
+-   **Elbow Point:**\
+    The "elbow" in the plot, where the total within-cluster sum of squares (WSS) starts to level off, occurs at **k = 3**. This suggests that dividing the data into 3 clusters provides an optimal balance between minimizing within-cluster variation and maintaining a manageable number of clusters.
+-   **Relevance to Penguins Dataset:**\
+    The identification of 3 optimal clusters aligns with the biological understanding of the dataset, where there are three distinct penguin species (**Adelie**, **Chinstrap**, and **Gentoo**). This supports the hypothesis that the clustering captures meaningful species-level differences in the data.
+
+### Summary:
+
+The Elbow Method confirms that **3 clusters** are optimal, consistent with the known species structure in the dataset. This result reinforces the appropriateness of clustering as a technique for analyzing the penguin dataset.
 
 ## Apply K-Means Clustering with 3 Clusters
 
@@ -175,15 +225,30 @@ print(cluster_species_table)
 
 ### Interpretation:
 
-- **High Agreement:** The majority of penguins are correctly clustered according to their species, validating the effectiveness of K-means clustering on this dataset.
-- **Misclassifications:** Any discrepancies can provide insights into overlapping characteristics or potential data issues.
+-   **High Agreement:**
+
+    -   The clustering results from K-means show a high level of agreement with the actual species labels:
+
+        -   **Cluster 1:** Contains 124 Gentoo penguins (perfect match with the Gentoo species).
+
+        -   **Cluster 2:** Predominantly consists of 74 Adelie penguins and 58 Chinstrap penguins, showing overlap between these species.
+
+        -   **Cluster 3:** Includes 78 Adelie penguins and 10 Chinstrap penguins, further indicating some misclassification between these two species.
+
+-   **Misclassifications:**
+
+    -   The overlap in **Cluster 2** and **Cluster 3** between Adelie and Chinstrap penguins suggests that these species share similar morphological traits, making them harder to distinguish through clustering.
+
+    -   The absence of Gentoo penguins in Clusters 2 and 3 highlights their distinct traits, making them easier to separate from the other species.
+
+-   **Biological Insights:**
+
+    -   Misclassifications between Adelie and Chinstrap penguins might reflect shared habitats or intermediate body characteristics. Further exploration of specific variables, such as bill length and depth, could help clarify the overlap.
+
+### Summary:
+
+The K-means clustering results align well with the actual species labels, demonstrating the effectiveness of this method in classifying penguin species. While Gentoo penguins are perfectly separated, the overlap between Adelie and Chinstrap species highlights areas for further analysis, potentially refining the clustering process or identifying overlapping features in these groups.
 
 # Conclusion
 
-The PCA effectively reduced the dataset's dimensionality while retaining a significant portion of the variance, facilitating visualization and interpretation. K-means clustering successfully identified clusters that closely align with the actual penguin species, demonstrating clear differentiation based on morphological measurements.
-
-# Recommendations
-
-- **Advanced Clustering Techniques:** Explore hierarchical clustering or DBSCAN for potentially better cluster identification.
-- **Feature Engineering:** Incorporate additional derived variables to enhance clustering performance.
-- **Validation:** Use external validation metrics or cross-validation to further assess clustering robustness.
+The PCA effectively reduced the dataset's dimensionality, retaining a substantial portion of the variance (80.1% in the first two components), and enabled clear visualization of species-level differences. K-means clustering complemented this by successfully identifying clusters that closely align with the actual penguin species. While Gentoo penguins were distinctly separated, some overlap between Adelie and Chinstrap penguins was observed, reflecting their shared morphological traits. Overall, the combination of PCA and K-means clustering provided meaningful insights into species differentiation based on morphological measurements.
