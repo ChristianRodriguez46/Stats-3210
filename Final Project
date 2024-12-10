@@ -13,6 +13,7 @@ library(cluster)          # For silhouette function
 library(reshape2)         # For melting the correlation matrix
 library(tibble)           # For rownames_to_column
 library(gbm)              # For Gradient Boosting Models
+library(DT)               # For interactive tables
 
 # Load and preprocess data
 data("penguins")
@@ -32,6 +33,7 @@ penguins <- penguins %>%
     BMI = body_mass_kg / (flipper_length_m^2)
   )
 
+# Define UI
 ui <- dashboardPage(
   dashboardHeader(title = "Palmer Penguins Analysis"),
   dashboardSidebar(
@@ -54,6 +56,18 @@ ui <- dashboardPage(
     selectInput("sex_filter", "Sex", choices = levels(penguins$sex), selected = levels(penguins$sex), multiple = TRUE)
   ),
   dashboardBody(
+    tags$head(
+      tags$style(HTML("
+        .scrollable-box {
+          max-height: 400px;
+          overflow-y: auto;
+        }
+        /* Adjusting box spacing */
+        .box {
+          margin-bottom: 20px;
+        }
+      "))
+    ),
     tabItems(
       # EDA Tab
       tabItem(tabName = "eda",
@@ -90,7 +104,9 @@ ui <- dashboardPage(
               ),
               fluidRow(
                 box(title = "Summary Statistics", status = "primary", solidHeader = TRUE, width = 12,
-                    tableOutput("summaryTable") %>% withSpinner(),
+                    div(class = "scrollable-box",
+                        DT::dataTableOutput("summaryTable") %>% withSpinner()
+                    ),
                     downloadButton("downloadSummary", "Download Summary")
                 )
               ),
@@ -165,6 +181,8 @@ ui <- dashboardPage(
                 ),
                 box(title = "PCA Scree Plot", status = "primary", solidHeader = TRUE, width = 6,
                     textInput("scree_title", "Scree Plot Title", "PCA Scree Plot"),
+                    sliderInput("scree_label_vjust", "Label Spacing (Vertical Justification)", 
+                                min = .5, max = 3, value = 1, step = 0.1),
                     plotlyOutput("screePlot") %>% withSpinner(),
                     downloadButton("downloadScree", "Download Scree Plot")
                 )
@@ -191,7 +209,9 @@ ui <- dashboardPage(
                     textInput("new_column_name", "New Column Name"),
                     textAreaInput("column_formula", "R Formula", placeholder = "e.g., ifelse(sex == 'male' & body_mass_g > 4000, 'Large Male', 'Other')"),
                     actionButton("modifyColumn", "Apply"),
-                    tableOutput("modifiedData") %>% withSpinner()
+                    div(class = "scrollable-box",
+                        DT::dataTableOutput("modifyDataTable") %>% withSpinner()
+                    )
                 )
               ),
               fluidRow(
@@ -209,7 +229,9 @@ ui <- dashboardPage(
                     selectInput("remove_col", "Select Column to Remove", choices = NULL),
                     actionButton("removeColumn", "Remove Column"),
                     helpText("Removing a column is permanent for this session."),
-                    tableOutput("downloadModifiedData") %>% withSpinner(),
+                    div(class = "scrollable-box",
+                        DT::dataTableOutput("removeColumnDataTable") %>% withSpinner()
+                    ),
                     downloadButton("downloadModifiedDataCSV", "Download Modified Data")
                 )
               )
@@ -224,7 +246,10 @@ ui <- dashboardPage(
               ),
               fluidRow(
                 box(title = "Download Modified Data", status = "primary", solidHeader = TRUE, width = 12,
-                    tableOutput("downloadModifiedData") %>% withSpinner(),
+                    selectInput("download_page_length", "Rows per Page", choices = c(10, 25, 50, 100), selected = 25),
+                    div(class = "scrollable-box",
+                        DT::dataTableOutput("downloadModifiedData") %>% withSpinner()
+                    ),
                     downloadButton("downloadModifiedDataCSV", "Download Modified Data")
                 )
               )
@@ -233,9 +258,10 @@ ui <- dashboardPage(
   )
 )
 
+# Define Server
 server <- function(input, output, session) {
   
-  # Initialize reactiveVal
+  # Initialize reactiveVal with filtered data
   modifiedData <- reactiveVal({
     penguins %>% 
       filter(!is.na(island))
@@ -274,23 +300,12 @@ server <- function(input, output, session) {
     updateSelectInput(session, "remove_col", choices = names(df))
   })
   
+  # Debug Info Output
   output$debugFilteredData <- renderPrint({
     df <- modifiedData()
     cat("Number of rows in filtered data:", nrow(df), "\n")
     str(df)
   })
-  
-  # Helper function to apply global alpha and shape where applicable
-  # For geoms that have "shape" and "alpha" parameters.
-  # We'll assume "shape" and "alpha" can be applied to point geoms.
-  apply_global_params <- function(p, use_points = FALSE) {
-    # If we are using points, set shape and alpha in geom_point
-    # We'll do this by modifying the geoms directly if possible.
-    # A simpler approach: when constructing the ggplot, incorporate alpha & shape arguments.
-    # If needed, we can re-build certain layers.
-    # Here we assume the caller sets them up initially.
-    p
-  }
   
   # Scatterplot
   output$scatterPlot <- renderPlotly({
@@ -307,6 +322,7 @@ server <- function(input, output, session) {
     ggplotly(p)
   })
   
+  # Download Scatterplot
   output$downloadScatter <- downloadHandler(
     filename = function() { paste("scatterplot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
@@ -321,7 +337,7 @@ server <- function(input, output, session) {
     }
   )
   
-  # Boxplot (Alpha can apply to box but shape doesn't apply to a boxplot)
+  # Boxplot
   output$boxPlot <- renderPlotly({
     df <- modifiedData()
     validate(
@@ -336,6 +352,7 @@ server <- function(input, output, session) {
     ggplotly(p)
   })
   
+  # Download Boxplot
   output$downloadBox <- downloadHandler(
     filename = function() { paste("boxplot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
@@ -371,6 +388,7 @@ server <- function(input, output, session) {
     ggplotly(p)
   })
   
+  # Download Histogram/Density Plot
   output$downloadHist <- downloadHandler(
     filename = function() { paste("histogram-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
@@ -392,7 +410,7 @@ server <- function(input, output, session) {
     }
   )
   
-  # Correlation Heatmap (No shape, but alpha can apply to geom_tile)
+  # Correlation Heatmap
   output$corrHeatmap <- renderPlotly({
     df <- modifiedData() %>% select_if(is.numeric) %>% na.omit()
     validate(
@@ -409,12 +427,17 @@ server <- function(input, output, session) {
                            name="Correlation") +
       labs(title = title) +
       theme_minimal() + 
-      theme(axis.text.x = element_text(angle = 45, vjust = 1, 
-                                       size = 12, hjust = 1)) +
+      theme(
+        axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 12, hjust = 1),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, face = "bold")
+      ) +
       coord_fixed()
     ggplotly(p)
   })
   
+  # Download Correlation Heatmap
   output$downloadCorr <- downloadHandler(
     filename = function() { paste("correlation-heatmap-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
@@ -432,42 +455,45 @@ server <- function(input, output, session) {
                              midpoint = 0, limit = c(-1,1), space = "Lab",
                              name="Correlation") +
         labs(title = title) +
-        theme_gray() +
-        theme(axis.text.x = element_text(angle = 45, vjust = 1, 
-                                         size = 12, hjust = 1)) +
+        theme_minimal() +
+        theme(
+          axis.text.x = element_text(angle = 45, vjust = 1, 
+                                     size = 12, hjust = 1),
+          axis.title = element_text(size = 14, face = "bold"),
+          plot.title = element_text(size = 16, face = "bold")
+        ) +
         coord_fixed()
       ggsave(file, plot = p)
     }
   )
   
-  # Summary (no plot)
-  output$summaryTable <- renderTable({
+  # Summary Statistics Table
+  output$summaryTable <- DT::renderDT({
     df <- modifiedData()
     validate(
       need(nrow(df) > 0, "No data available for summary.")
     )
-    summary_list <- lapply(names(df), function(var){
+    
+    # Initialize an empty list to store summaries
+    summary_list <- list()
+    
+    for(var in names(df)){
       if(is.numeric(df[[var]])){
-        mean_val <- mean(df[[var]], na.rm = TRUE)
-        sd_val <- sd(df[[var]], na.rm = TRUE)
-        median_val <- median(df[[var]], na.rm = TRUE)
-        min_val <- min(df[[var]], na.rm = TRUE)
-        max_val <- max(df[[var]], na.rm = TRUE)
-        data.frame(
+        summary_list[[var]] <- data.frame(
           Variable = var,
           Type = "Numeric",
-          Mean = round(mean_val, 2),
-          SD = round(sd_val, 2),
-          Median = round(median_val, 2),
-          Min = round(min_val, 2),
-          Max = round(max_val, 2),
+          Mean = round(mean(df[[var]], na.rm = TRUE), 2),
+          SD = round(sd(df[[var]], na.rm = TRUE), 2),
+          Median = round(median(df[[var]], na.rm = TRUE), 2),
+          Min = round(min(df[[var]], na.rm = TRUE), 2),
+          Max = round(max(df[[var]], na.rm = TRUE), 2),
           Counts = NA,
           stringsAsFactors = FALSE
         )
       } else if(is.factor(df[[var]])){
         counts <- table(df[[var]])
         counts_str <- paste(names(counts), counts, sep=": ", collapse=", ")
-        data.frame(
+        summary_list[[var]] <- data.frame(
           Variable = var,
           Type = "Categorical",
           Mean = NA,
@@ -479,12 +505,23 @@ server <- function(input, output, session) {
           stringsAsFactors = FALSE
         )
       }
-    })
-    summary_df <- bind_rows(summary_list) %>%
-      select(Variable, Type, Mean, SD, Median, Min, Max, Counts)
-    summary_df
+    }
+    
+    # Combine all summaries into a single data frame
+    summary_df <- bind_rows(summary_list)
+    
+    # Ensure one row per variable and arrange alphabetically
+    summary_df <- summary_df %>%
+      arrange(Variable)
+    
+    DT::datatable(summary_df, 
+                  options = list(autoWidth = TRUE, scrollX = TRUE, scrollY = "400px"),
+                  rownames = FALSE, 
+                  caption = "Summary Statistics of Filtered Data")
   })
   
+  
+  # Download Summary Statistics
   output$downloadSummary <- downloadHandler(
     filename = function() { paste("summary-", Sys.Date(), ".csv", sep = "") },
     content = function(file) {
@@ -492,28 +529,26 @@ server <- function(input, output, session) {
       if(nrow(df) == 0){
         write.csv(data.frame(Error = "No data available for summary."), file, row.names = FALSE)
       } else {
-        summary_list <- lapply(names(df), function(var){
+        # Initialize an empty list to store summaries
+        summary_list <- list()
+        
+        for(var in names(df)){
           if(is.numeric(df[[var]])){
-            mean_val <- mean(df[[var]], na.rm = TRUE)
-            sd_val <- sd(df[[var]], na.rm = TRUE)
-            median_val <- median(df[[var]], na.rm = TRUE)
-            min_val <- min(df[[var]], na.rm = TRUE)
-            max_val <- max(df[[var]], na.rm = TRUE)
-            data.frame(
+            summary_list[[var]] <- data.frame(
               Variable = var,
               Type = "Numeric",
-              Mean = round(mean_val, 2),
-              SD = round(sd_val, 2),
-              Median = round(median_val, 2),
-              Min = round(min_val, 2),
-              Max = round(max_val, 2),
+              Mean = round(mean(df[[var]], na.rm = TRUE), 2),
+              SD = round(sd(df[[var]], na.rm = TRUE), 2),
+              Median = round(median(df[[var]], na.rm = TRUE), 2),
+              Min = round(min(df[[var]], na.rm = TRUE), 2),
+              Max = round(max(df[[var]], na.rm = TRUE), 2),
               Counts = NA,
               stringsAsFactors = FALSE
             )
           } else if(is.factor(df[[var]])){
             counts <- table(df[[var]])
             counts_str <- paste(names(counts), counts, sep=": ", collapse=", ")
-            data.frame(
+            summary_list[[var]] <- data.frame(
               Variable = var,
               Type = "Categorical",
               Mean = NA,
@@ -525,17 +560,22 @@ server <- function(input, output, session) {
               stringsAsFactors = FALSE
             )
           }
-        })
+        }
         
-        summary_df <- bind_rows(summary_list) %>%
-          select(Variable, Type, Mean, SD, Median, Min, Max, Counts)
+        # Combine all summaries into a single data frame
+        summary_df <- bind_rows(summary_list)
+        
+        # Ensure one row per variable and arrange alphabetically
+        summary_df <- summary_df %>%
+          arrange(Variable)
         
         write.csv(summary_df, file, row.names = FALSE)
       }
     }
   )
   
-  # Predictive Modeling (no changes to add shape/alpha since we don't have a plot with points here except varImpPlot)
+  
+  # Predictive Modeling Setup
   model_data <- reactive({
     df <- modifiedData()
     req(input$response_var, input$predictor_vars)
@@ -546,6 +586,7 @@ server <- function(input, output, session) {
     df
   })
   
+  # Train Model upon Action Button Click
   trainedModel <- eventReactive(input$runModel, {
     df <- model_data()
     if(is.null(df) || nrow(df) < 5){
@@ -567,7 +608,8 @@ server <- function(input, output, session) {
     formula <- as.formula(paste(input$response_var, "~", paste(input$predictor_vars, collapse = "+")))
     
     train_method <- ifelse(input$use_cv, "cv", "none")
-    train_control <- trainControl(method = train_method, number = ifelse(input$use_cv, 5, 1), 
+    train_control <- trainControl(method = train_method, 
+                                  number = ifelse(input$use_cv, 5, 1), 
                                   classProbs = response_is_factor, 
                                   summaryFunction = if(response_is_factor) multiClassSummary else defaultSummary)
     
@@ -596,6 +638,7 @@ server <- function(input, output, session) {
     )
   })
   
+  # Display Trained Model Summary
   output$modelOutput <- renderPrint({
     model_info <- trainedModel()
     validate(
@@ -604,6 +647,7 @@ server <- function(input, output, session) {
     model_info$model
   })
   
+  # Download Model Summary
   output$downloadModel <- downloadHandler(
     filename = function() { paste("model-summary-", Sys.Date(), ".txt", sep = "") },
     content = function(file) {
@@ -618,6 +662,7 @@ server <- function(input, output, session) {
     }
   )
   
+  # Display Model Performance
   output$modelPerformance <- renderPrint({
     model_info <- trainedModel()
     validate(
@@ -647,6 +692,7 @@ server <- function(input, output, session) {
     }
   })
   
+  # Variable Importance Plot
   output$varImpPlot <- renderPlotly({
     model_info <- trainedModel()
     req(model_info)
@@ -659,7 +705,12 @@ server <- function(input, output, session) {
         geom_bar(stat = "identity", fill = "steelblue", alpha = input$global_alpha) +
         coord_flip() +
         labs(title = title, x = "Variables", y = "Importance") +
-        theme_minimal()
+        theme_minimal() +
+        theme(
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 14, face = "bold"),
+          plot.title = element_text(size = 16, face = "bold")
+        )
       ggplotly(p)
     } else {
       return(NULL)
@@ -683,7 +734,12 @@ server <- function(input, output, session) {
         geom_point(alpha = input$global_alpha, shape = as.numeric(input$global_shape)) +
         geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
         labs(title = title, x = "Fitted Values", y = "Residuals") +
-        theme_minimal()
+        theme_minimal() +
+        theme(
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 14, face = "bold"),
+          plot.title = element_text(size = 16, face = "bold")
+        )
       ggplotly(p)
     })
     
@@ -701,7 +757,12 @@ server <- function(input, output, session) {
         geom_point(alpha = input$global_alpha, shape = as.numeric(input$global_shape)) +
         geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
         labs(title = title, x = "Theoretical Quantiles", y = "Sample Quantiles") +
-        theme_minimal()
+        theme_minimal() +
+        theme(
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 14, face = "bold"),
+          plot.title = element_text(size = 16, face = "bold")
+        )
       ggplotly(p)
     })
     
@@ -718,7 +779,12 @@ server <- function(input, output, session) {
         geom_point(alpha = input$global_alpha, shape = as.numeric(input$global_shape)) +
         geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
         labs(title = title, x = "Actual Values", y = "Predicted Values") +
-        theme_minimal()
+        theme_minimal() +
+        theme(
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 14, face = "bold"),
+          plot.title = element_text(size = 16, face = "bold")
+        )
       ggplotly(p)
     })
   })
@@ -737,19 +803,20 @@ server <- function(input, output, session) {
       } else {
         df <- df %>% mutate(!!input$new_column_name := new_col)
         modifiedData(df)
-        output$modifiedData <- renderTable({
-          head(df, 10)
-        }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
-        
-        output$downloadModifiedData <- renderTable({
-          head(df, 10)
-        }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+        output$modifyDataTable <- DT::renderDT({
+          df <- modifiedData()
+          DT::datatable(df, 
+                        options = list(pageLength = 25, autoWidth = TRUE, scrollX = TRUE, scrollY = "400px"),
+                        rownames = FALSE, 
+                        caption = "Preview of Modified Data After Column Addition/Modification")
+        })
         
         showNotification("Column added/modified successfully.", type = "message")
       }
     }
   })
   
+  # Transformation Preview
   transformPreviewData <- reactiveVal(NULL)
   
   observeEvent(input$previewTransform, {
@@ -785,6 +852,7 @@ server <- function(input, output, session) {
     transformPreviewData(list(transformed = transformed, msg = msg))
   })
   
+  # Render Transformation Preview Table
   output$transformPreview <- renderTable({
     preview <- transformPreviewData()
     req(preview)
@@ -796,12 +864,14 @@ server <- function(input, output, session) {
     }
   }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
   
+  # Render Transformation Message
   output$transformMsg <- renderText({
     preview <- transformPreviewData()
     req(preview)
     preview$msg
   })
   
+  # Apply Transformation
   observeEvent(input$applyTransform, {
     preview <- transformPreviewData()
     req(preview)
@@ -819,9 +889,13 @@ server <- function(input, output, session) {
     modifiedData(df)
     showNotification("Transformation applied successfully.", type = "message")
     
-    output$downloadModifiedData <- renderTable({
-      head(df, 10)
-    }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+    output$modifyDataTable <- DT::renderDT({
+      df <- modifiedData()
+      DT::datatable(df, 
+                    options = list(pageLength = 25, autoWidth = TRUE, scrollX = TRUE, scrollY = "400px"),
+                    rownames = FALSE, 
+                    caption = "Preview of Modified Data After Transformation")
+    })
   })
   
   # Remove Column
@@ -832,12 +906,16 @@ server <- function(input, output, session) {
     modifiedData(df)
     showNotification(paste("Column", input$remove_col, "removed."), type = "message")
     
-    output$downloadModifiedData <- renderTable({
-      head(df, 10)
-    }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+    output$removeColumnDataTable <- DT::renderDT({
+      df <- modifiedData()
+      DT::datatable(df, 
+                    options = list(pageLength = 25, autoWidth = TRUE, scrollX = TRUE, scrollY = "400px"),
+                    rownames = FALSE, 
+                    caption = "Preview of Modified Data After Column Removal")
+    })
   })
   
-  # Download Data
+  # Download Filtered Data as CSV
   output$downloadData <- downloadHandler(
     filename = function() { paste("filtered-data-", Sys.Date(), ".csv", sep = "") },
     content = function(file) {
@@ -846,11 +924,16 @@ server <- function(input, output, session) {
     }
   )
   
-  output$downloadModifiedData <- renderTable({
+  # Download Modified Data Preview
+  output$downloadModifiedData <- DT::renderDT({
     df <- modifiedData()
-    head(df, 10)
-  }, striped = TRUE, hover = TRUE, spacing = "m", bordered = TRUE)
+    DT::datatable(df, 
+                  options = list(pageLength = input$download_page_length, autoWidth = TRUE, scrollX = TRUE, scrollY = "400px"),
+                  rownames = FALSE, 
+                  caption = "Preview of Modified Data")
+  })
   
+  # Download Modified Data as CSV
   output$downloadModifiedDataCSV <- downloadHandler(
     filename = function() { paste("modified-data-", Sys.Date(), ".csv", sep = "") },
     content = function(file) {
@@ -858,7 +941,7 @@ server <- function(input, output, session) {
     }
   )
   
-  # PCA and Clustering with alpha and shape
+  # PCA Data Preparation
   pca_data <- reactive({
     df <- modifiedData() %>% select_if(is.numeric) %>% na.omit()
     if(input$normalize_pca && nrow(df) > 0){
@@ -867,6 +950,7 @@ server <- function(input, output, session) {
     df
   })
   
+  # PCA Biplot
   output$pcaPlot <- renderPlotly({
     df <- pca_data()
     validate(
@@ -875,22 +959,24 @@ server <- function(input, output, session) {
     pca_res <- prcomp(df, center = TRUE, scale. = FALSE)
     species <- modifiedData()$species[complete.cases(modifiedData()[,sapply(modifiedData(), is.numeric)])]
     title <- ifelse(nchar(input$pca_title) > 0, input$pca_title, "PCA Biplot")
-    # fviz_pca_biplot doesn't have a direct alpha/shape param for points,
-    # but we can extract the data and re-plot with ggplot if needed.
-    # Alternatively, we can customize the resulting plot with ggplot2 code.
-    # We'll use ggplot2 approach:
+    # Create PCA Biplot using factoextra
     p <- fviz_pca_biplot(pca_res, geom = "point", habillage = species, addEllipses = TRUE)
-    # Extract the ggplot from fviz
+    # Add title
     p <- p + labs(title = title)
-    # Modify layers to apply alpha/shape to points:
-    # fviz_pca_biplot creates points with geom_point(). We can override with theme or scale.
-    # We'll do a trick: layers in p:
-    # Find the point layer and set shape/alpha:
+    # Modify point aesthetics
     p$layers[[1]]$aes_params$alpha <- input$global_alpha
     p$layers[[1]]$aes_params$shape <- as.numeric(input$global_shape)
+    # Adjust theme for consistency
+    p <- p + theme(
+      axis.text = element_text(size = 12),
+      axis.title = element_text(size = 14, face = "bold"),
+      plot.title = element_text(size = 16, face = "bold")
+    )
+    # Convert to Plotly
     ggplotly(p)
   })
   
+  # Download PCA Biplot
   output$downloadPCA <- downloadHandler(
     filename = function() { paste("pca-plot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
@@ -906,23 +992,64 @@ server <- function(input, output, session) {
         labs(title = title)
       p$layers[[1]]$aes_params$alpha <- input$global_alpha
       p$layers[[1]]$aes_params$shape <- as.numeric(input$global_shape)
+      # Adjust theme for consistency
+      p <- p + theme(
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, face = "bold")
+      )
+      # Save the plot
       ggsave(file, plot = p)
     }
   )
   
+  # Scree Plot with Adjusted Percentage Label Placement and Y-axis as Variance (%)
   output$screePlot <- renderPlotly({
     df <- pca_data()
     validate(
       need(nrow(df) > 1, "Not enough data for Scree plot.")
     )
+    
+    # Perform PCA
     pca_res <- prcomp(df, center = TRUE, scale. = FALSE)
+    
+    # Extract eigenvalues
+    eig_vals <- pca_res$sdev^2
+    total_var <- sum(eig_vals)
+    percent_var <- round((eig_vals / total_var) * 100, 1)
+    
+    # Create data frame for Scree Plot
+    scree_df <- data.frame(
+      PC = paste0("PC", 1:length(eig_vals)),
+      Percentage = percent_var
+    )
+    
+    # Define plot title
     title <- ifelse(nchar(input$scree_title) > 0, input$scree_title, "PCA Scree Plot")
-    p <- fviz_eig(pca_res, addlabels = TRUE, ylim = c(0, 100)) +
-      labs(title = title) +
-      theme_gray()
+    
+    # Create Scree Plot using ggplot2
+    p <- ggplot(scree_df, aes(x = PC, y = Percentage)) +
+      geom_bar(stat = "identity", fill = "steelblue", alpha = input$global_alpha) +
+      geom_text(aes(label = paste0(Percentage, "%")), 
+                nudge_y = input$scree_label_vjust,    # Dynamic label spacing using nudge_y
+                size = 4,
+                color = "black",
+                fontface = "bold") +
+      labs(title = title, x = "Principal Components", y = "Variance (%)") +
+      theme_minimal() +
+      theme(
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, face = "bold")
+      ) +
+      ylim(0, max(scree_df$Percentage) * 1.1)  # Add some space above bars for labels
+    
+    # Convert to Plotly for interactivity
     ggplotly(p)
   })
   
+  
+  # Download Scree Plot
   output$downloadScree <- downloadHandler(
     filename = function() { paste("scree-plot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
@@ -931,15 +1058,47 @@ server <- function(input, output, session) {
         showNotification("Not enough data for Scree plot.", type = "error")
         return(NULL)
       }
+      
+      # Perform PCA
       pca_res <- prcomp(df, center = TRUE, scale. = FALSE)
+      
+      # Extract eigenvalues
+      eig_vals <- pca_res$sdev^2
+      total_var <- sum(eig_vals)
+      percent_var <- round((eig_vals / total_var) * 100, 1)
+      
+      # Create data frame for Scree Plot
+      scree_df <- data.frame(
+        PC = paste0("PC", 1:length(eig_vals)),
+        Percentage = percent_var
+      )
+      
+      # Define plot title
       title <- ifelse(nchar(input$scree_title) > 0, input$scree_title, "PCA Scree Plot")
-      p <- fviz_eig(pca_res, addlabels = TRUE, ylim = c(0, 100)) +
-        labs(title = title) +
-        theme_gray()
+      
+      # Create Scree Plot using ggplot2
+      p <- ggplot(scree_df, aes(x = PC, y = Percentage)) +
+        geom_bar(stat = "identity", fill = "steelblue", alpha = input$global_alpha) +
+        geom_text(aes(label = paste0(Percentage, "%")), 
+                  nudge_y = input$scree_label_vjust,    # Dynamic label spacing using nudge_y
+                  size = 4,
+                  color = "black",
+                  fontface = "bold") +
+        labs(title = title, x = "Principal Components", y = "Variance (%)") +
+        theme_minimal() +
+        theme(
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 14, face = "bold"),
+          plot.title = element_text(size = 16, face = "bold")
+        ) +
+        ylim(0, max(scree_df$Percentage) * 1.1)  # Add some space above bars for labels
+      
+      # Save the plot as a PNG file
       ggsave(file, plot = p)
     }
   )
   
+  # Clustering Data Preparation
   clustering_data <- reactive({
     df <- modifiedData() %>% 
       select_if(is.numeric) %>% 
@@ -950,6 +1109,7 @@ server <- function(input, output, session) {
     df
   })
   
+  # Clustering Plot
   output$clusterPlot <- renderPlotly({
     df_scaled <- clustering_data()
     validate(
@@ -972,12 +1132,21 @@ server <- function(input, output, session) {
                         habillage = modifiedData()$species[complete.cases(clustering_data())])
     }
     # Modify point layers in p:
-    p <- p + labs(title = title)
-    p$layers[[1]]$aes_params$alpha <- input$global_alpha
-    p$layers[[1]]$aes_params$shape <- as.numeric(input$global_shape)
+    p <- p + labs(title = title) +
+      theme(
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14, face = "bold"),
+        plot.title = element_text(size = 16, face = "bold")
+      )
+    # Apply global alpha and shape
+    if(length(p$layers) >= 1){
+      p$layers[[1]]$aes_params$alpha <- input$global_alpha
+      p$layers[[1]]$aes_params$shape <- as.numeric(input$global_shape)
+    }
     ggplotly(p)
   })
   
+  # Download Clustering Plot
   output$downloadCluster <- downloadHandler(
     filename = function() { paste("cluster-plot-", Sys.Date(), ".png", sep = "") },
     content = function(file) {
@@ -1002,30 +1171,39 @@ server <- function(input, output, session) {
                           ellipse.type = "norm", 
                           habillage = modifiedData()$species[complete.cases(clustering_data())])
       }
-      p <- p + labs(title = title)
-      p$layers[[1]]$aes_params$alpha <- input$global_alpha
-      p$layers[[1]]$aes_params$shape <- as.numeric(input$global_shape)
+      p <- p + labs(title = title) +
+        theme(
+          axis.text = element_text(size = 12),
+          axis.title = element_text(size = 14, face = "bold"),
+          plot.title = element_text(size = 16, face = "bold")
+        )
+      # Apply global alpha and shape
+      if(length(p$layers) >= 1){
+        p$layers[[1]]$aes_params$alpha <- input$global_alpha
+        p$layers[[1]]$aes_params$shape <- as.numeric(input$global_shape)
+      }
       ggsave(file, plot = p)
     }
   )
   
+  # Clustering Metrics
   output$clusterMetrics <- renderTable({
     df_scaled <- clustering_data()
     validate(
       need(nrow(df_scaled) > 1, "Not enough data for clustering metrics.")
     )
     title <- ifelse(nchar(input$metrics_title) > 0, input$metrics_title, "Clustering Metrics")
-    cat(title, "\n")
+    # Initialize an empty list to hold metrics
+    metrics_list <- list()
     algo <- input$clust_algo
     if(algo == "K-Means"){
       set.seed(123)
       kmeans_res <- kmeans(df_scaled, centers = input$num_clusters)
       silhouette_avg <- silhouette(kmeans_res$cluster, dist(df_scaled))
       avg_sil <- mean(silhouette_avg[, 3])
-      df_metrics <- data.frame(
-        Metric = c("Total Within Sum of Squares", "Average Silhouette Width"),
-        Value = c(kmeans_res$tot.withinss, round(avg_sil, 3)),
-        stringsAsFactors = FALSE
+      metrics_list <- list(
+        "Total Within Sum of Squares" = kmeans_res$tot.withinss,
+        "Average Silhouette Width" = round(avg_sil, 3)
       )
     } else {
       dist_mat <- dist(df_scaled)
@@ -1033,14 +1211,19 @@ server <- function(input, output, session) {
       clusters <- cutree(hc, k = input$num_clusters)
       silhouette_avg <- silhouette(clusters, dist_mat)
       avg_sil <- mean(silhouette_avg[, 3])
-      df_metrics <- data.frame(
-        Metric = c("Height of Dendrogram", "Average Silhouette Width"),
-        Value = c(max(hc$height), round(avg_sil, 3)),
-        stringsAsFactors = FALSE
+      metrics_list <- list(
+        "Height of Dendrogram" = max(hc$height),
+        "Average Silhouette Width" = round(avg_sil, 3)
       )
     }
+    df_metrics <- data.frame(
+      Metric = names(metrics_list),
+      Value = unlist(metrics_list),
+      stringsAsFactors = FALSE
+    )
     df_metrics
   })
 }
 
+# Run the Shiny App
 shinyApp(ui = ui, server = server)
